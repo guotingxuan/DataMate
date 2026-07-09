@@ -47,6 +47,19 @@ def _import_operators():
     from . import remove_duplicate_sentences
     from . import knowledge_relation_slice
     from . import pii_ner_detection
+    from . import chronic_file_ingest
+    from . import chronic_table_clean
+    from . import chronic_field_normalize
+    from . import chronic_text_split
+    from . import chronic_entity_extract
+    from . import chronic_relation_extract
+    from . import chronic_triple_validate
+    from . import chronic_kg_build
+    from . import chronic_sqlite_loader
+    from . import chronic_nl2sql_analyze
+    from . import chronic_report_pack
+    from . import chronic_entity_extract_model_npu
+    from . import chronic_relation_extract_model_npu
 
 
 _import_operators()
