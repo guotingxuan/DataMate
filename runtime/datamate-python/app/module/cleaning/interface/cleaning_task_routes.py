@@ -1,6 +1,8 @@
 from typing import Optional
+import re
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -15,6 +17,31 @@ from app.module.cleaning.service import CleaningTaskService
 from app.module.shared.schema import StandardResponse, PaginatedData
 
 logger = get_logger(__name__)
+
+# Module-level pattern for task_id sanitization (CodeQL sanitizer)
+_TASK_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _sanitize_task_id(task_id: str) -> str:
+    """Validate and return sanitized task_id for safe path construction.
+
+    CodeQL recognizes the return value of this function as sanitized,
+    allowing safe use in path construction.
+    """
+    if not _TASK_ID_PATTERN.fullmatch(task_id):
+        raise ValueError(f"Invalid task_id: {task_id}")
+    return task_id
+
+
+def _sanitize_retry_count(retry_count: int) -> int:
+    """Validate and return sanitized retry_count for safe path construction.
+
+    CodeQL recognizes the return value of this function as sanitized,
+    allowing safe use in path construction.
+    """
+    if retry_count < 0 or retry_count > 1000:
+        raise ValueError(f"Invalid retry_count: {retry_count}")
+    return retry_count
 
 router = APIRouter(prefix="/cleaning/tasks", tags=["Cleaning Tasks"])
 
@@ -46,20 +73,16 @@ def _get_task_service(db: AsyncSession) -> CleaningTaskService:
         CleaningTaskScheduler,
         CleaningTaskValidator,
     )
+    from app.module.cleaning.service.cleaning_task_scheduler import get_scheduler
     from app.module.cleaning.repository import (
         CleaningTaskRepository,
         CleaningResultRepository,
         OperatorInstanceRepository,
     )
-    from app.module.cleaning.runtime_client import RuntimeClient
     from app.module.dataset.service import DatasetManagementService
     from app.module.shared.common.lineage import LineageService
 
-    runtime_client = RuntimeClient()
-    scheduler = CleaningTaskScheduler(
-        task_repo=CleaningTaskRepository(None),
-        runtime_client=runtime_client
-    )
+    scheduler = get_scheduler()  # 使用全局单例，保持轮询状态跨请求共享
     operator_service = _get_operator_service()
     dataset_service = DatasetManagementService(db)
     lineage_service = LineageService(db)
@@ -83,7 +106,7 @@ def _get_task_service(db: AsyncSession) -> CleaningTaskService:
     response_model=StandardResponse[PaginatedData[CleaningTaskDto]],
     summary="查询清洗任务列表",
     description="根据参数查询清洗任务列表（支持分页、状态过滤、关键词搜索）",
-    tags=['mcp']
+    tags=["mcp"],
 )
 async def get_cleaning_tasks(
     page: int = 0,
@@ -108,7 +131,7 @@ async def get_cleaning_tasks(
             total_elements=count,
             total_pages=total_pages,
             content=tasks,
-        )
+        ),
     )
 
 
@@ -117,7 +140,7 @@ async def get_cleaning_tasks(
     response_model=StandardResponse[CleaningTaskDto],
     summary="创建清洗任务",
     description="根据模板ID或算子列表创建清洗任务",
-    tags=['mcp']
+    tags=["mcp"],
 )
 async def create_cleaning_task(
     request: CreateCleaningTaskRequest,
@@ -139,7 +162,7 @@ async def create_cleaning_task(
     "/{task_id}",
     response_model=StandardResponse[CleaningTaskDto],
     summary="获取清洗任务详情",
-    description="根据ID获取清洗任务详细信息"
+    description="根据ID获取清洗任务详细信息",
 )
 async def get_cleaning_task(
     task_id: str,
@@ -155,7 +178,7 @@ async def get_cleaning_task(
     "/{task_id}",
     response_model=StandardResponse[str],
     summary="删除清洗任务",
-    description="删除指定的清洗任务"
+    description="删除指定的清洗任务",
 )
 async def delete_cleaning_task(
     task_id: str,
@@ -172,7 +195,7 @@ async def delete_cleaning_task(
     "/{task_id}/stop",
     response_model=StandardResponse[str],
     summary="停止清洗任务",
-    description="停止正在运行的清洗任务"
+    description="停止正在运行的清洗任务",
 )
 async def stop_cleaning_task(
     task_id: str,
@@ -189,7 +212,7 @@ async def stop_cleaning_task(
     "/{task_id}/execute",
     response_model=StandardResponse[str],
     summary="执行清洗任务",
-    description="重新执行清洗任务"
+    description="重新执行清洗任务",
 )
 async def execute_cleaning_task(
     task_id: str,
@@ -206,7 +229,7 @@ async def execute_cleaning_task(
     "/{task_id}/result",
     response_model=StandardResponse[list[CleaningResultDto]],
     summary="获取清洗任务结果",
-    description="获取指定清洗任务的执行结果"
+    description="获取指定清洗任务的执行结果",
 )
 async def get_cleaning_task_results(
     task_id: str,
@@ -219,10 +242,199 @@ async def get_cleaning_task_results(
 
 
 @router.get(
+    "/{task_id}/result/download",
+    summary="下载清洗任务结果文件压缩包",
+    description="下载指定清洗任务的源文件和处理后文件压缩包",
+)
+async def download_cleaning_result_files(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Download cleaning task result files (both src and dest)"""
+    import zipfile
+    import io
+    from pathlib import Path
+    from fastapi.responses import StreamingResponse
+    from app.core.exception import BusinessError, ErrorCodes
+
+    task_service = _get_task_service(db)
+
+    task = await task_service.get_task(db, task_id)
+
+    results = await task_service.get_task_results(db, task_id)
+    if not results:
+        raise BusinessError(ErrorCodes.NOT_FOUND, f"Cleaning task {task_id} not found")
+
+    src_path = Path("/dataset") / task.src_dataset_id
+
+    dest_path = Path("/dataset") / task.dest_dataset_id
+
+    zip_buffer = io.BytesIO()
+
+    with zipfile.ZipFile(zip_buffer, "w") as zipf:
+        for file_record in results:
+            if file_record.src_name:
+                src_path = src_path / file_record.src_name
+                if src_path.exists():
+                    zipf.write(src_path, arcname=f"src/{file_record.src_name}")
+
+            if file_record.dest_name:
+                dest_path = dest_path / file_record.dest_name
+                if dest_path.exists():
+                    zipf.write(dest_path, arcname=f"dest/{file_record.dest_name}")
+
+    zip_buffer.seek(0)
+
+    filename = f"task_{task_id}_{file_record.src_name}.zip"
+
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get(
+    "/{task_id}/log/stream",
+    summary="流式获取清洗任务日志",
+    description="通过SSE流式获取清洗任务日志",
+)
+async def stream_cleaning_task_log(
+    task_id: str,
+    retry_count: int = 0,
+    db: AsyncSession = Depends(get_db),
+):
+    """Stream cleaning task log via SSE"""
+    import asyncio
+    import json
+    import re
+    from pathlib import Path
+
+    flow_base = Path("/flow").resolve()
+
+    # 校验 task_id 并获取净化后的值（CodeQL 认可此返回值为安全）
+    try:
+        safe_task_id = _sanitize_task_id(task_id)
+    except ValueError:
+        logger.warning(f"Invalid task_id in stream_log: task_id={task_id}")
+
+        async def invalid_error_generator():
+            yield f"data: {json.dumps({'level': 'ERROR', 'message': 'Invalid task_id'}, ensure_ascii=False)}\n\n"
+
+        return StreamingResponse(invalid_error_generator(), media_type="text/event-stream")
+
+    task_service = _get_task_service(db)
+    task = await task_service.task_repo.find_task_by_id(db, safe_task_id)
+
+    if not task:
+
+        async def error_generator():
+            yield f"data: {json.dumps({'level': 'ERROR', 'message': 'Task not found'}, ensure_ascii=False)}\n\n"
+
+        return StreamingResponse(error_generator(), media_type="text/event-stream")
+
+    # 校验并净化 retry_count（CodeQL 认可此返回值为安全）
+    safe_retry_count = _sanitize_retry_count(retry_count)
+    log_filename = "output.log" if safe_retry_count == 0 else f"output.log.{safe_retry_count}"
+    log_path = (flow_base / safe_task_id / log_filename).resolve()
+
+    # 防止路径穿越：parents 校验仍在 flow_base 下
+    if flow_base not in log_path.parents:
+        logger.warning(f"Path traversal attempt in stream_log: task_id={task_id}")
+
+        async def traversal_error_generator():
+            yield f"data: {json.dumps({'level': 'ERROR', 'message': 'Invalid task_id'}, ensure_ascii=False)}\n\n"
+
+        return StreamingResponse(traversal_error_generator(), media_type="text/event-stream")
+
+    standard_level_pattern = re.compile(
+        r"\b(DEBUG|Debug|INFO|Info|WARN|Warn|WARNING|Warning|ERROR|Error|FATAL|Fatal)\b"
+    )
+    exception_suffix_pattern = re.compile(r"\b\w+(Warning|Error|Exception)\b")
+
+    def get_log_level(line: str, default_level: str) -> str:
+        if not line or not line.strip():
+            return default_level
+        std_match = standard_level_pattern.search(line)
+        if std_match:
+            return std_match.group(1).upper()
+        ex_match = exception_suffix_pattern.search(line)
+        if ex_match:
+            match = ex_match.group(1).upper()
+            if match == "WARNING":
+                return "WARN"
+            if match in ["ERROR", "EXCEPTION"]:
+                return "ERROR"
+        return default_level
+
+    async def log_generator():
+        last_position = 0
+        last_level = "INFO"
+        heartbeat_counter = 0
+        HEARTBEAT_INTERVAL = 10
+
+        while True:
+            try:
+                current_task = await task_service.task_repo.find_task_by_id(db, safe_task_id)
+                is_task_finished = current_task and current_task.status in [
+                    "COMPLETED",
+                    "FAILED",
+                    "STOPPED",
+                ]
+
+                if log_path.exists():
+                    with open(log_path, "r", encoding="utf-8") as f:
+                        f.seek(last_position)
+                        new_content = f.read()
+                        if new_content:
+                            for line in new_content.splitlines(keepends=True):
+                                last_level = get_log_level(line, last_level)
+                                log_entry = json.dumps(
+                                    {"level": last_level, "message": line.rstrip()},
+                                    ensure_ascii=False,
+                                )
+                                yield f"data: {log_entry}\n\n"
+                            last_position = f.tell()
+                            heartbeat_counter = 0
+                        else:
+                            heartbeat_counter += 1
+
+                        f.seek(0, 2)
+                        current_size = f.tell()
+                        if current_size < last_position:
+                            last_position = 0
+                else:
+                    heartbeat_counter += 1
+
+                if is_task_finished:
+                    yield f"data: {json.dumps({'level': 'INFO', 'message': '[END_OF_STREAM]'}, ensure_ascii=False)}\n\n"
+                    break
+
+                if heartbeat_counter >= HEARTBEAT_INTERVAL:
+                    yield f"data: {json.dumps({'level': 'DEBUG', 'message': '[HEARTBEAT]'}, ensure_ascii=False)}\n\n"
+                    heartbeat_counter = 0
+
+                await asyncio.sleep(1)
+            except Exception as e:
+                logger.error(f"Error reading log file: {e}")
+                await asyncio.sleep(2)
+
+    return StreamingResponse(
+        log_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get(
     "/{task_id}/log/{retry_count}",
     response_model=StandardResponse[list[CleaningTaskLog]],
     summary="获取清洗任务日志",
-    description="获取指定清洗任务的执行日志"
+    description="获取指定清洗任务的执行日志",
 )
 async def get_cleaning_task_log(
     task_id: str,
@@ -233,3 +445,77 @@ async def get_cleaning_task_log(
     task_service = _get_task_service(db)
     logs = await task_service.get_task_log(db, task_id, retry_count)
     return StandardResponse(code="0", message="success", data=logs)
+
+
+@router.get(
+    "/{task_id}/log/{retry_count}/download",
+    summary="下载清洗任务日志文件",
+    description="下载指定清洗任务的日志文件",
+)
+async def download_cleaning_task_log(
+    task_id: str,
+    retry_count: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Download cleaning task log file"""
+    from pathlib import Path
+    from fastapi.responses import FileResponse
+
+    flow_base = Path("/flow").resolve()
+
+    # 校验 task_id 并获取净化后的值（CodeQL 认可此返回值为安全）
+    try:
+        safe_task_id = _sanitize_task_id(task_id)
+    except ValueError:
+        logger.warning(f"Invalid task_id in download_log: task_id={task_id}")
+        from app.core.exception import BusinessError, ErrorCodes
+        raise BusinessError(
+            ErrorCodes.CLEANING_TASK_LOG_NOT_FOUND,
+            f"Invalid task_id: {task_id}",
+        )
+
+    task_service = _get_task_service(db)
+    task = await task_service.task_repo.find_task_by_id(db, safe_task_id)
+
+    if not task:
+        from app.core.exception import BusinessError, ErrorCodes
+
+        raise BusinessError(ErrorCodes.CLEANING_TASK_NOT_FOUND, task_id)
+
+    # 校验并净化 retry_count（CodeQL 认可此返回值为安全）
+    safe_retry_count = _sanitize_retry_count(retry_count)
+    log_filename = "output.log" if safe_retry_count == 0 else f"output.log.{safe_retry_count}"
+    log_path = (flow_base / safe_task_id / log_filename).resolve()
+
+    # 防止路径穿越：parents 校验仍在 flow_base 下
+    if flow_base not in log_path.parents:
+        logger.warning(f"Path traversal attempt in download_log: task_id={task_id}")
+        from app.core.exception import BusinessError, ErrorCodes
+        raise BusinessError(
+            ErrorCodes.CLEANING_TASK_LOG_NOT_FOUND,
+            f"Invalid task_id: {task_id}",
+        )
+
+    if not log_path.exists():
+        from app.core.exception import BusinessError, ErrorCodes
+
+        raise BusinessError(
+            ErrorCodes.CLEANING_TASK_LOG_NOT_FOUND,
+            f"Log file not found for task {task_id}, retry {retry_count}",
+        )
+
+    # Generate filename with task name and retry count
+    import re
+
+    task_name = task.name or "未命名任务"
+    safe_task_name = re.sub(
+        r"[^\w\u4e00-\u9fff\-]", "_", task_name
+    )  # Keep alphanumeric, Chinese, and hyphens
+    run_number = retry_count + 1  # retry_count is 0-indexed, so add 1 for display
+    filename = f"{safe_task_name}_第{run_number}次运行.log"
+
+    return FileResponse(
+        path=log_path,
+        media_type="text/plain",
+        filename=filename,
+    )

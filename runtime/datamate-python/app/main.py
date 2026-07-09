@@ -2,9 +2,11 @@ from contextlib import asynccontextmanager
 from typing import Literal
 from urllib.parse import urlparse, urlunparse
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi_mcp import FastApiMCP
+from fastapi.responses import RedirectResponse
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.exception import (
@@ -15,14 +17,20 @@ from app.core.exception import (
     BusinessError,
 )
 from app.core.logging import setup_logging, get_logger
-from app.db.session import AsyncSessionLocal
+from app.db.session import AsyncSessionLocal, get_db
 from app.middleware import UserContextMiddleware
 from app.module import router
-from app.module.collection.schedule import load_scheduled_collection_tasks, set_collection_scheduler
+from app.module.collection.schedule import (
+    load_scheduled_collection_tasks,
+    set_collection_scheduler,
+)
 from app.module.shared.schedule import Scheduler
+from app.module.generation.service.task_executor import init_executor, shutdown_executor
+from app.module.system.service.log_pvc_monitor import schedule_log_pvc_monitor
 
 setup_logging()
 logger = get_logger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -61,12 +69,25 @@ async def lifespan(app: FastAPI):
     collection_scheduler.start()
     set_collection_scheduler(collection_scheduler)
     await load_scheduled_collection_tasks()
+    schedule_log_pvc_monitor(collection_scheduler)
+
+    # Initialize generation task executor
+    init_executor(max_workers=10, max_concurrent_tasks=5)
+    logger.info("Generation task executor initialized")
+
+    # 恢复未完成任务的轮询 + 启动全局状态轮询协程
+    from app.module.cleaning.service.cleaning_task_scheduler import get_scheduler
+    scheduler = get_scheduler()
+    await scheduler.startup()
+    logger.info("Cleaning task status polling started")
 
     yield
 
     # @shutdown
     collection_scheduler.shutdown()
+    shutdown_executor()
     logger.info("DataMate Python Backend shutting down ...\n\n")
+
 
 # 创建FastAPI应用
 app = FastAPI(
@@ -74,7 +95,7 @@ app = FastAPI(
     description=settings.app_description,
     version=settings.app_version,
     debug=settings.debug,
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # 注册全局异常捕获中间件（最外层，确保捕获所有异常）
@@ -90,21 +111,25 @@ app.include_router(router)
 # 注册全局异常处理器
 register_exception_handlers(app)
 
+
 # 测试端点：验证异常处理
 @app.get("/test-success", include_in_schema=False)
 async def test_success():
     """测试成功响应"""
     return SuccessResponse(data={"message": "Test successful"})
 
+
 @app.get("/test-business-error", include_in_schema=False)
 async def test_business_error():
     """测试业务错误响应"""
     raise BusinessError(ErrorCodes.ANNOTATION_TASK_NOT_FOUND)
 
+
 @app.get("/test-system-error", include_in_schema=False)
 async def test_system_error():
     """测试系统错误响应"""
     raise SystemError(ErrorCodes.DATABASE_ERROR)
+
 
 # 根路径
 @app.get("/", include_in_schema=False)
@@ -119,7 +144,13 @@ async def root():
         }
     )
 
-mcp = FastApiMCP(app, name="DataMate MCP", description="DataMate python mcp server", include_tags=["mcp"])
+
+mcp = FastApiMCP(
+    app,
+    name="DataMate MCP",
+    description="DataMate python mcp server",
+    include_tags=["mcp"],
+)
 mcp.mount_http(mount_path="/api/mcp")
 
 if __name__ == "__main__":
@@ -130,5 +161,5 @@ if __name__ == "__main__":
         host=settings.host,
         port=settings.port,
         reload=settings.debug,
-        log_level=settings.log_level.lower()
+        log_level=settings.log_level.lower(),
     )

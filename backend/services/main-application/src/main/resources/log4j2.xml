@@ -3,8 +3,8 @@
     <Properties>
         <Property name="LOG_PATH">/var/log/datamate/backend</Property>
         <Property name="LOG_PATTERN">%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{50} - %msg%n</Property>
-        <Property name="MAX_FILE_SIZE">100MB</Property>
-        <Property name="MAX_HISTORY">30</Property>
+        <Property name="MAX_FILE_SIZE">${env:LOG_ROTATION_MAX_SIZE:-100MB}</Property>
+        <Property name="MAX_HISTORY">${env:LOG_ROTATION_BACKUP_COUNT:-30}</Property>
         <Property name="LOG_LEVEL">INFO</Property>
         <Property name="SQL_LOG_LEVEL">WARN</Property>
     </Properties>

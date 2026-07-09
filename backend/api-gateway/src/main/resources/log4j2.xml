@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN" monitorInterval="30">
+    <Properties>
+        <Property name="LOG_PATH">/var/log/datamate/gateway</Property>
+        <Property name="LOG_PATTERN">%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{50} - %msg%n</Property>
+        <Property name="MAX_FILE_SIZE">${env:LOG_ROTATION_MAX_SIZE:-100MB}</Property>
+        <Property name="MAX_HISTORY">${env:LOG_ROTATION_BACKUP_COUNT:-30}</Property>
+        <Property name="LOG_LEVEL">INFO</Property>
+        <Property name="SQL_LOG_LEVEL">WARN</Property>
+    </Properties>
+
+    <Appenders>
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout pattern="${LOG_PATTERN}" />
+        </Console>
+
+        <RollingFile name="File" fileName="${LOG_PATH}/app.log" filePattern="${LOG_PATH}/app-%d{yyyy-MM-dd}-%i.log">
+            <PatternLayout pattern="${LOG_PATTERN}" />
+            <Policies>
+                <TimeBasedTriggeringPolicy interval="1" modulate="true" />
+                <SizeBasedTriggeringPolicy size="${MAX_FILE_SIZE}" />
+            </Policies>
+            <DefaultRolloverStrategy max="${MAX_HISTORY}" />
+        </RollingFile>
+    </Appenders>
+
+    <Loggers>
+        <Logger name="com.datamate" level="${LOG_LEVEL}" />
+        <Logger name="org.springframework.security" level="${LOG_LEVEL}" />
+        <Logger name="org.hibernate.SQL" level="${SQL_LOG_LEVEL}" />
+        <Logger name="org.hibernate.type.descriptor.sql.BasicBinder" level="${SQL_LOG_LEVEL}" />
+
+        <Root level="INFO">
+            <AppenderRef ref="Console" />
+            <AppenderRef ref="File" />
+        </Root>
+    </Loggers>
+</Configuration>

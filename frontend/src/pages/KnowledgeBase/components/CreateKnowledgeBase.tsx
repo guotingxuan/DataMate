@@ -109,7 +109,8 @@ export default function CreateKnowledgeBase({
       setOpen(false);
       onUpdate();
     } catch (error) {
-      message.error(t("knowledgeBase.create.messages.operationFailed") + error.data.message);
+      // 错误已由全局拦截器统一处理，此处不再重复提示
+      console.error("知识库操作失败:", error);
     }
   };
 
@@ -176,7 +177,14 @@ export default function CreateKnowledgeBase({
           <Form.Item
             label={t("knowledgeBase.create.form.nameLabel")}
             name="name"
-            rules={[{ required: true, message: t("knowledgeBase.create.form.nameRequired") }]}
+            rules={[
+              { required: true, message: t("knowledgeBase.create.form.nameRequired") },
+              { max: 255, message: t("knowledgeBase.create.form.nameMaxLength") },
+              {
+                pattern: /^[a-zA-Z][a-zA-Z0-9_]*$/,
+                message: t("knowledgeBase.create.form.namePattern"),
+              },
+            ]}
           >
             <Input placeholder={t("knowledgeBase.create.form.namePlaceholder")} />
           </Form.Item>

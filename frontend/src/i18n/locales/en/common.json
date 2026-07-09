@@ -7,15 +7,22 @@
     "actions": {
       "login": "Login",
       "register": "Register",
-      "logout": "Logout"
+      "logout": "Logout",
+      "gotoLogin": "Go to Login"
     },
+    "authMode": {
+      "sso": "SSO Login",
+      "jwt": "JWT Login"
+    },
+    "group": "Group",
     "messages": {
       "loginSuccess": "Login successful",
       "loginFailed": "Login failed, please try again later",
       "signupSuccess": "Registration successful, auto-login",
       "signupFailed": "Registration failed, please try again later",
       "logoutSuccess": "Logged out successfully",
-      "passwordMismatch": "Passwords do not match"
+      "passwordMismatch": "Passwords do not match",
+      "useSSO": "Please use ModelEngine single sign-on to register"
     },
     "loginDialog": {
       "title": "Login",
@@ -94,8 +101,8 @@
         "updateSuccess": "Task updated successfully",
         "updateFailed": "Failed to update task",
         "deleteSuccess": "Task deleted",
-        "deleteConfirm": "Are you sure you want to delete this task? This action cannot be undone.",
-        "deleteConfirmMessage": "Are you sure you want to delete task \"{{taskName}}\"? This action cannot be undone.",
+        "deleteTitle": "Confirm delete collection task",
+        "deleteDesc": "Are you sure you want to delete \"{{itemName}}\"? This action cannot be undone.",
         "confirmDelete": "Delete",
         "cancel": "Cancel"
       },
@@ -277,6 +284,7 @@
     "description": "Create, import and manage datasets",
     "actions": {
       "createDataset": "Create Dataset",
+      "detail": "Details",
       "edit": "Edit",
       "import": "Import",
       "importData": "Import Data",
@@ -289,7 +297,9 @@
       "rename": "Rename",
       "createFolder": "New Folder",
       "cancel": "Cancel",
-      "confirm": "Confirm"
+      "confirm": "Confirm",
+      "renameFile": "Rename File",
+      "renameFolder": "Rename Folder"
     },
     "stats": {
       "totalDatasets": "Total Datasets",
@@ -372,10 +382,14 @@
       "fileDownloadSuccess": "File downloaded successfully"
     },
     "confirm": {
-      "deleteDatasetTitle": "Confirm delete this dataset?",
-      "deleteDatasetDesc": "This dataset cannot be recovered after deletion. Proceed with caution.",
-      "deleteFolderTitle": "Confirm delete folder?",
-      "deleteFolderDesc": "Deleting folder \"{{name}}\" will remove all files and subfolders. This action cannot be undone.",
+      "deleteDatasetTitle": "Confirm delete dataset",
+      "deleteDatasetDesc": "Are you sure you want to delete \"{{itemName}}\"? This action cannot be undone.",
+      "deleteFileTitle": "Confirm delete file",
+      "deleteFileDesc": "Are you sure you want to delete \"{{itemName}}\"? This action cannot be undone.",
+      "deleteFolderTitle": "Confirm delete folder",
+      "deleteFolderDesc": "Are you sure you want to delete \"{{itemName}}\" and all its contents? This action cannot be undone.",
+      "batchDeleteTitle": "Confirm batch delete",
+      "batchDeleteDesc": "Are you sure you want to delete the selected {{count}} item(s)? This action cannot be undone.",
       "deleteConfirm": "Delete",
       "deleteCancel": "Cancel"
     },
@@ -394,7 +408,8 @@
       "previewTitle": "File Preview: {{name}}",
       "previewEmpty": "No preview available or unsupported file type.",
       "previewInfoTitle": "File Info",
-      "editTitle": "Edit Dataset - {{name}}"
+      "editTitle": "Edit Dataset - {{name}}",
+      "datasetDetail": "Dataset Details"
     },
     "labels": {
       "id": "ID",
@@ -516,7 +531,9 @@
         "statisticsSummary": "{{categoryCount}} categories, {{totalLabels}} label samples",
         "detailsCardTitle": "Label Distribution Details",
         "totalLabels": "Total: {{count}} labels",
-        "moreLabels": "And {{count}} more labels..."
+        "moreLabels": "And {{count}} more labels...",
+        "paginationTotal": "Total {{total}} items",
+        "uncategorized": "Uncategorized"
       }
     },
     "import": {
@@ -584,10 +601,12 @@
       "videoJsonl": "Dataset for large-scale video pretraining"
     },
     "datasetStatus": {
+      "draft": "Draft",
       "active": "Active",
       "processing": "Processing",
-      "inactive": "Inactive",
-      "draft": "Draft"
+      "archived": "Archived",
+      "published": "Published",
+      "deprecated": "Deprecated"
     },
     "dataSources": {
       "upload": "Local Upload",
@@ -595,6 +614,10 @@
     }
   },
   "common": {
+    "yes": "Yes",
+    "no": "No",
+    "cancel": "Cancel",
+    "refresh": "Refresh",
     "settings": {
       "title": "Settings"
     },
@@ -620,6 +643,10 @@
         "pending": "Ready",
         "paused": "Paused"
       }
+    },
+    "loading": "Loading...",
+    "table": {
+      "file": "File"
     }
   },
   "ratioTask": {
@@ -648,8 +675,8 @@
         "deleteFailed": "Task deletion failed, please try again later"
       },
       "confirm": {
-        "deleteTitle": "Confirm delete this task?",
-        "deleteDesc": "This task cannot be recovered after deletion. Please proceed with caution.",
+        "deleteTitle": "Confirm delete ratio task",
+        "deleteDesc": "Are you sure you want to delete \"{{itemName}}\"? This action cannot be undone.",
         "okText": "Delete",
         "cancelText": "Cancel"
       },
@@ -734,8 +761,8 @@
         "delete": "Delete"
       },
       "confirm": {
-        "deleteTitle": "Confirm delete this ratio task?",
-        "deleteDesc": "This task cannot be recovered after deletion. Please proceed with caution.",
+        "deleteTitle": "Confirm delete ratio task",
+        "deleteDesc": "Are you sure you want to delete \"{{itemName}}\"? This action cannot be undone.",
         "okText": "Delete",
         "cancelText": "Cancel"
       },
@@ -1141,7 +1168,8 @@
         "createFailed": "Failed to create annotation task, please try again",
         "autoCreateSuccess": "Auto annotation task created successfully",
         "autoCreateFailed": "Failed to create auto annotation task",
-        "datasetTypeFiltered": "Datasets have been filtered by template type, please re-select dataset and files"
+        "datasetTypeFiltered": "Datasets have been filtered by template type, please re-select dataset and files",
+        "datasetTypeMismatch": "Template type does not match dataset type, please select a matching template or dataset"
       }
     },
     "template": {
@@ -1223,8 +1251,28 @@
       },
       "messages": {
         "deleteSuccess": "Auto annotation task deleted successfully",
-        "deleteFailed": "Deletion failed, please try again later"
-      }
+        "deleteFailed": "Deletion failed, please try again later",
+        "cannotJumpNoBase": "Cannot jump to Label Studio: Label Studio base URL not configured",
+        "downloadFailed": "Download failed",
+        "downloadPreparing": "Preparing download...",
+        "downloadStarted": "Download started",
+        "fetchTasksFailed": "Failed to fetch tasks",
+        "noDatasetBound": "This auto annotation task is not bound to a dataset",
+        "noProjectFound": "No corresponding annotation project found",
+        "outputPath": "Output Path",
+        "processedImages": "Processed Images",
+        "resultPathTitle": "Result Path",
+        "syncFailed": "Sync failed",
+        "syncLoading": "Syncing...",
+        "syncSuccess": "Sync successful",
+        "syncToDbTitle": "Confirm sync annotation results to database?",
+        "syncToDbContent1": "This operation will override current file tags and annotation information based on task data in Label Studio",
+        "syncToDbContent2": "After sync, you can view latest tags and annotations in dataset file details"
+      },
+      "downloadResult": "Download Result",
+      "viewResult": "View Result",
+      "refresh": "Refresh",
+      "more": "More"
     },
     "annotate": {
       "title": "Annotation Workspace",
@@ -1251,12 +1299,32 @@
         "import": "Import",
         "loading": "Importing...",
         "success": "Import successful",
-        "failed": "Import failed, please try again later"
+        "failed": "Import failed, please try again later",
+        "exportFormat": "Export Format",
+        "exportFormatRequired": "Please select export format",
+        "fileNameLabel": "File Name",
+        "fileNamePlaceholder": "Please enter file name",
+        "taskLabel": "Annotation Task",
+        "taskLabelAuto": "Auto Annotation Task"
       },
       "syncToDb": {
         "loading": "Syncing annotations from Label Studio to database...",
         "success": "Sync completed",
         "fail": "Sync failed, please try again later"
+      },
+      "customTemplate": {
+        "title": "Custom Template",
+        "nameLabel": "Template Name",
+        "namePlaceholder": "Please enter template name",
+        "nameRequired": "Please enter template name",
+        "descriptionLabel": "Template Description",
+        "descriptionPlaceholder": "Please enter template description",
+        "codeLabel": "Template Code",
+        "codePlaceholder": "Please enter template code",
+        "codeRequired": "Please enter template code",
+        "previewLabel": "Preview",
+        "okText": "OK",
+        "saveSuccess": "Saved successfully"
       }
     },
     "const": {
@@ -1296,7 +1364,8 @@
         "averageTime": "Average Time",
         "reviewCount": "Pending Review"
       }
-    }
+    },
+    "title": "Data Annotation"
   },
   "dataCleansing": {
     "title": "Data Processing",
@@ -1327,20 +1396,25 @@
       "pause": "Pause",
       "compare": "Compare",
       "download": "Download",
-      "delete": "Delete",
       "batchDownload": "Batch Download",
+      "delete": "Delete",
       "edit": "Edit",
       "selectAll": "Select All",
       "search": "Search",
       "reset": "Reset",
       "config": "Parameter Configuration",
-      "selectOperatorConfig": "Please select an operator for parameter configuration"
+      "selectOperatorConfig": "Please select an operator for parameter configuration",
+      "actions": "Actions"
     },
     "steps": {
       "basicInfo": "Basic Info",
       "operatorOrchestration": "Operator Orchestration"
     },
     "task": {
+      "sections": {
+        "taskInfo": "Task Information",
+        "dataSourceSelection": "Data Source Selection"
+      },
       "columns": {
         "taskName": "Task Name",
         "taskId": "Task ID",
@@ -1361,27 +1435,38 @@
         "name": "Name",
         "namePlaceholder": "Enter task name",
         "description": "Description",
-        "descriptionPlaceholder": "Describe the task goals and requirements",
+        "descriptionPlaceholder": "Describe the purpose",
         "srcDataset": "Source Dataset",
-        "srcDatasetPlaceholder": "Please select source dataset",
+        "srcDatasetPlaceholder": "Select source dataset",
         "destDatasetName": "Target Dataset Name",
         "destDatasetNamePlaceholder": "Enter or select target dataset name",
         "destDatasetType": "Target Dataset Type",
-        "destDatasetTypeRequired": "Please select target dataset type"
-      },
-      "sections": {
-        "taskInfo": "Task Info",
-        "dataSourceSelection": "Data Source Selection"
+        "useSourceDataset": "Use Source Dataset",
+        "useSourceDatasetHint": "Output will be replaced in source dataset",
+        "cannotUseSourceDataset": "Cannot use source dataset as destination",
+        "destDatasetNameRequired": "Destination dataset name is required",
+        "destDatasetTypeRequired": "Target dataset type is required",
+        "allTypes": "All",
+        "showingDatasets": "Showing {{count}} datasets",
+        "noDatasetsFound": "No datasets found"
       },
       "messages": {
+        "fetchTaskLogFailed": "Failed to fetch task log",
+        "fetchTaskResultFailed": "Failed to fetch task result",
         "taskCreated": "Task created successfully",
-        "taskStarted": "Task started successfully",
-        "taskPaused": "Task paused successfully",
         "taskDeleted": "Task deleted successfully",
         "taskDetailFailed": "Failed to fetch task details",
-        "fetchTaskResultFailed": "Failed to fetch task results",
-        "fetchTaskLogFailed": "Failed to fetch task logs"
+        "taskPaused": "Task paused",
+        "taskStarted": "Task started",
+        "deleteFailed": "Failed to delete task, please try again later"
+      },
+      "confirm": {
+        "deleteTitle": "Confirm delete data processing task",
+        "deleteDesc": "Are you sure you want to delete \"{{itemName}}\"? This action cannot be undone."
       }
+    },
+    "create": {
+      "typeMismatch": "Type mismatch: previous operator outputs \"{{from}}\", but current operator requires \"{{to}}\""
     },
     "template": {
       "columns": {
@@ -1424,13 +1509,17 @@
         "processedFileType": "Processed File Type",
         "beforeSize": "Before Size",
         "afterSize": "After Size",
+        "result": "Result",
+        "resultDetail": "Result Detail",
         "status": "Status",
         "actions": "Actions",
         "searchFileName": "Search file name",
         "searchFileType": "Search file type",
         "selectFiles": "{{count}} files selected",
+        "selectedFilesCount": "Selected {{count}} files",
         "notCompleted": "Not Completed",
         "downloadNotAvailable": "Not Available Yet",
+        "downloadFilesFailed": "Failed to download files",
         "compareDialogTitle": "File Comparison - {{fileName}}",
         "beforeProcessing": "Before Processing",
         "afterProcessing": "After Processing",
@@ -1446,7 +1535,10 @@
         "selectRun": "Select Run",
         "currentDisplay": "Current Display: {{num}}th Run",
         "nthRun": "{{num}}th Run",
-        "noLogs": "No logs available for this task"
+        "noLogs": "No logs available for this task",
+        "streaming": "Streaming...",
+        "download": "Download Log",
+        "downloadFailed": "Failed to download log file"
       },
       "operatorTable": {
         "serialNumber": "Serial Number",
@@ -1512,10 +1604,17 @@
     },
     "status": {
       "completed": "Completed",
+      "partialSuccess": "Partial Success",
       "failed": "Failed",
       "running": "Running",
       "pending": "Pending",
       "stopped": "Stopped"
+    },
+    "logTable": {
+      "nthRun": "Run #{{n}}"
+    },
+    "paramConfig": {
+      "enterValue": "Enter value"
     }
   },
   "knowledgeBase": {
@@ -1567,6 +1666,8 @@
       "confirm": {
         "deleteTitle": "Confirm deletion of this knowledge base?",
         "deleteDescription": "It cannot be recovered after deletion. Please operate with caution.",
+        "deleteFileTitle": "Confirm deletion of this file?",
+        "deleteFileDescription": "Are you sure you want to delete \"{{name}}\"? This action cannot be undone.",
         "okText": "Delete",
         "cancelText": "Cancel"
       },
@@ -1596,7 +1697,8 @@
         "noProperties": "No properties"
       },
       "breadcrumb": {
-        "kbList": "Knowledge Bases"
+        "kbList": "Knowledge Bases",
+        "kbDetail": "Knowledge Base Detail"
       },
       "searchPlaceholder": "Search file name..."
     },
@@ -1610,16 +1712,38 @@
       "actions": {
         "download": "Download",
         "save": "Save",
-        "cancel": "Cancel"
+        "cancel": "Cancel",
+        "confirm": "Confirm",
+        "formatJson": "Format",
+        "view": "View",
+        "edit": "Edit",
+        "delete": "Delete"
       },
       "messages": {
         "noChunks": "No chunk data",
         "chunkCount": "chunks",
+        "totalChunks": "Total {{count}} chunks",
+        "showingRange": "showing {{start}}-{{end}}",
         "ready": "Ready",
         "previousPage": "Previous Page",
         "nextPage": "Next Page",
         "chunkLabel": "Chunk",
-        "loadFailed": "Load failed"
+        "loadFailed": "Load failed",
+        "updateSuccess": "Chunk updated successfully",
+        "updateFailed": "Failed to update chunk",
+        "deleteSuccess": "Chunk deleted successfully",
+        "deleteFailed": "Failed to delete chunk",
+        "invalidMetadata": "Invalid metadata JSON format",
+        "invalidMetadataFormat": "Metadata is not valid JSON format",
+        "textRequired": "Chunk content cannot be empty",
+        "formatSuccess": "JSON formatted successfully",
+        "metadataHint": "Please enter valid JSON format. Click 'Format' button to auto-format.",
+        "jsonValid": "Valid JSON",
+        "jsonInvalid": "Invalid JSON"
+      },
+      "placeholders": {
+        "chunkContent": "Enter chunk content",
+        "metadata": "Enter metadata (JSON format)"
       },
       "modal": {
         "sliceTraceTitle": "Knowledge Slice Trace",
@@ -1634,11 +1758,23 @@
         "position": "Position",
         "tokenCount": "Token Count",
         "pageNumber": "Page Number",
-        "chapter": "Chapter"
+        "chapter": "Chapter",
+        "deleteConfirmTitle": "Confirm Delete Chunk",
+        "deleteConfirmMessage": "Are you sure you want to delete this chunk? This will also delete the vector data in Milvus and cannot be undone.",
+        "editChunkTitle": "Edit Chunk"
       },
       "breadcrumb": {
         "kbList": "Knowledge Bases",
         "kbDetail": "Knowledge Base Detail"
+      },
+      "defaultFileName": "File {{id}}",
+      "filter": {
+        "title": "Filter",
+        "idOperator": "ID Operator",
+        "idValue": "ID Value",
+        "textKeyword": "Text Keyword",
+        "apply": "Apply",
+        "clear": "Clear"
       }
     },
     "create": {
@@ -1652,6 +1788,8 @@
         "nameLabel": "Knowledge Base Name",
         "namePlaceholder": "Please enter knowledge base name",
         "nameRequired": "Please enter knowledge base name",
+        "nameMaxLength": "Knowledge base name cannot exceed 255 characters",
+        "namePattern": "Knowledge base name must start with a letter and can only contain letters, numbers, and underscores",
         "descriptionLabel": "Description",
         "descriptionPlaceholder": "Please enter knowledge base description (optional)",
         "embeddingModelLabel": "Embedding Model",
@@ -1863,6 +2001,56 @@
         "latestVersion": "Latest Version",
         "noReleases": "No version release information",
         "initialize": "Click to initialize"
+      },
+      "examples": {
+        "copyCode": "Copy Code"
+      },
+      "service": {
+        "notSupported": "Deployment not supported",
+        "confirmUninstall": "Confirm uninstall service?",
+        "uninstallConfirm": "The service will stop running after uninstallation. Continue?",
+        "uninstall": "Uninstall",
+        "status": {
+          "running": "Running",
+          "failed": "Failed",
+          "standby": "Standby",
+          "stopped": "Stopped"
+        },
+        "notDeployed": "Not deployed",
+        "clickToDeploy": "Click to deploy",
+        "deploy": "Deploy",
+        "notSupportedHint": "This operator does not support deployment",
+        "deploymentInfo": "Deployment Info",
+        "deployedAt": "Deployed At",
+        "version": "Version",
+        "replicas": "Replicas",
+        "uninstallService": "Uninstall Service",
+        "podMonitor": "Pod Monitor",
+        "noPods": "No Pods",
+        "createdAt": "Created At",
+        "cpuUsage": "CPU Usage",
+        "memoryUsage": "Memory Usage",
+        "restartCount": "Restart Count",
+        "viewLogs": "View Logs",
+        "deploying": "Deploying",
+        "logs": "Logs",
+        "copyLogs": "Copy Logs",
+        "close": "Close"
+      },
+      "requirement": {
+        "systemRequirements": "System Requirements",
+        "cpuSpec": "CPU Spec",
+        "noLimit": "No Limit",
+        "memorySpec": "Memory Spec",
+        "storage": "Storage",
+        "gpuSupport": "GPU Support",
+        "npuSupport": "NPU Support",
+        "dependencies": "Dependencies",
+        "parseError": "Failed to parse data"
+      },
+      "reviews": {
+        "basedOn": "Based on {{count}} reviews",
+        "stars": "{{rating}} stars"
       }
     },
     "create": {
@@ -2141,15 +2329,19 @@
         "cot": "Chain of Thought Generation"
       },
       "confirm": {
-        "deleteTitle": "Confirm delete this task?",
-        "deleteContent": "Task name: {{name}}",
+        "deleteTitle": "Confirm delete synthesis task",
+        "deleteDesc": "Are you sure you want to delete \"{{name}}\"? This action cannot be undone.",
         "archiveTitle": "Confirm archive this synthesis task?",
         "archiveContent": "Task name: {{name}}"
       },
       "modal": {
         "evalTitle": "Create Evaluation Task",
         "evalName": "Evaluation Task Name",
-        "evalMethod": "Evaluation Method",
+        "evalMethod": {
+          "auto": "Auto Evaluation",
+          "cot": "CoT Evaluation",
+          "qa": "QA Evaluation"
+        },
         "evalModel": "Evaluation Model",
         "evalSource": "Source: Synthesis Task (SYNTHESIS)",
         "sourceName": "Source Name: {{name}}",
@@ -2166,7 +2358,10 @@
           "grammarErrorDesc": "The question is interrogative, the answer is declarative...",
           "answerRelevance": "Answer Relevance",
           "answerRelevanceDesc": "The answer should provide a direct, positive response..."
-        }
+        },
+        "evalMethodRequired": "Please select evaluation method",
+        "evalNameRequired": "Please enter evaluation name",
+        "taskType": "Task Type"
       },
       "archive": {
         "success": "Archive successful",
@@ -2309,6 +2504,9 @@
         "all": "All Types",
         "preset": "Preset",
         "custom": "Custom"
+      },
+      "actions": {
+        "createTemplate": "Create Template"
       }
     },
     "createTemplate": {
@@ -2421,6 +2619,7 @@
         "unknown": "Unknown",
         "processing": "Processing",
         "completed": "Completed",
+        "partialSuccess": "Partial Success",
         "failed": "Failed"
       },
       "operations": {
@@ -2428,9 +2627,9 @@
         "delete": "Delete Task"
       },
       "confirm": {
-        "deleteTitle": "Confirm delete this synthesis task?",
-        "deleteDescription": "This task cannot be recovered after deletion, please proceed with caution.",
-        "okText": "Confirm Delete",
+        "deleteTitle": "Confirm delete synthesis task",
+        "deleteDescription": "Are you sure you want to delete \"{{name}}\"? This action cannot be undone.",
+        "okText": "Delete",
         "cancelText": "Cancel"
       },
       "messages": {
@@ -2453,13 +2652,24 @@
       "evaluationCreated": "Evaluation task created successfully",
       "evaluationCreateFailed": "Failed to create evaluation task",
       "fetchModelsFailed": "Failed to fetch model list"
+    },
+    "common": {
+      "id": "ID"
     }
   },
   "components": {
     "errorBoundary": {
       "title": "An error occurred",
       "retry": "Retry",
-      "goHome": "Go Home"
+      "goHome": "Go Home",
+      "componentStack": "Component Stack",
+      "errorMessage": "Error Message"
+    },
+    "deleteConfirm": {
+      "title": "Confirm Delete",
+      "message": "This action cannot be undone. Are you sure you want to delete {{itemName}}?",
+      "confirm": "Delete",
+      "cancel": "Cancel"
     },
     "searchControls": {
       "searchPlaceholder": "Search...",

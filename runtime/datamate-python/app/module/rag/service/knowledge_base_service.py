@@ -14,9 +14,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exception import BusinessError, ErrorCodes
 from app.db.models.dataset_management import DatasetFiles
-from app.db.models.knowledge_gen import KnowledgeBase, RagFile, FileStatus
+from app.db.models.knowledge_gen import KnowledgeBase, RagFile, FileStatus, RagType
 from app.db.models.models import Models
-from app.module.rag.infra.vectorstore import drop_collection, rename_collection, delete_chunks_by_rag_file_ids
+from app.module.rag.infra.embeddings import EmbeddingFactory
+from app.module.rag.infra.vectorstore import (
+    drop_collection,
+    rename_collection,
+    delete_chunks_by_rag_file_ids,
+    update_chunk_by_id,
+    delete_chunk_by_id,
+)
 from app.module.rag.repository import KnowledgeBaseRepository, RagFileRepository
 from app.module.rag.schema.request import (
     KnowledgeBaseCreateReq,
@@ -88,15 +95,27 @@ class KnowledgeBaseService:
         if not knowledge_base:
             raise BusinessError(ErrorCodes.RAG_KNOWLEDGE_BASE_NOT_FOUND)
 
-        old_name = knowledge_base.name
+        old_name = str(knowledge_base.name)
+        new_name = request.name
+        kb_type = knowledge_base.type
+
+        if new_name and new_name != old_name:
+            if await self.kb_repo.exists_by_name(new_name, exclude_id=knowledge_base_id):
+                raise BusinessError(ErrorCodes.RAG_KNOWLEDGE_BASE_ALREADY_EXISTS, data={"name": new_name})
+
         knowledge_base.name = request.name
         knowledge_base.description = request.description
 
         await self.kb_repo.update(knowledge_base)
 
-        if old_name != request.name:
+        if old_name != new_name:
             try:
-                rename_collection(old_name, request.name)
+                if kb_type == RagType.DOCUMENT.value:
+                    rename_collection(old_name, new_name)
+                elif kb_type == RagType.GRAPH.value:
+                    from app.module.rag.service.strategy.graph_strategy import GraphKnowledgeBaseStrategy
+                    GraphKnowledgeBaseStrategy.rename_workspace(old_name, new_name)
+                    GraphKnowledgeBaseStrategy.clear_cache(old_name)
             except BusinessError:
                 await self.db.rollback()
                 raise
@@ -113,13 +132,30 @@ class KnowledgeBaseService:
         if not knowledge_base:
             raise BusinessError(ErrorCodes.RAG_KNOWLEDGE_BASE_NOT_FOUND)
 
+        kb_name = str(knowledge_base.name)
+        kb_type = knowledge_base.type
+
         await self.file_repo.delete_by_knowledge_base(knowledge_base_id)
         await self.kb_repo.delete(knowledge_base_id)
 
-        try:
-            drop_collection(knowledge_base.name)
-        except Exception as e:
-            logger.error("删除 Milvus 集合失败: %s", e)
+        if kb_type == RagType.DOCUMENT.value:
+            try:
+                drop_collection(kb_name)
+            except Exception as e:
+                logger.error("删除 Milvus 集合失败: %s", e)
+        elif kb_type == RagType.GRAPH.value:
+            try:
+                from app.module.rag.service.strategy.graph_strategy import GraphKnowledgeBaseStrategy
+                import shutil
+                from pathlib import Path
+                from app.core.config import settings
+                workspace_path = Path(settings.rag_storage_dir) / kb_name
+                if workspace_path.exists():
+                    shutil.rmtree(workspace_path)
+                    logger.info("已删除知识图谱 workspace: %s", kb_name)
+                GraphKnowledgeBaseStrategy.clear_cache(kb_name)
+            except Exception as e:
+                logger.error("删除知识图谱 workspace 失败: %s", e)
 
         await self.db.commit()
 
@@ -141,7 +177,8 @@ class KnowledgeBaseService:
         })
         return KnowledgeBaseResp(**data)
 
-    def _kb_to_dict(self, kb: KnowledgeBase) -> dict:
+    @staticmethod
+    def _kb_to_dict(kb: KnowledgeBase) -> dict:
         """知识库实体转字典"""
         return {
             "id": kb.id,
@@ -320,24 +357,36 @@ class KnowledgeBaseService:
         if not request.file_ids:
             raise BusinessError(ErrorCodes.BAD_REQUEST, "文件ID列表不能为空")
 
-        # 获取文件列表
+        kb_type = knowledge_base.type
+        kb_name = str(knowledge_base.name)
+
         rag_files = []
         for file_id in request.file_ids:
             rag_file = await self.file_repo.get_by_id(file_id)
             if rag_file:
                 rag_files.append(rag_file)
 
-        # 删除 Milvus 数据
         if rag_files:
-            try:
-                delete_chunks_by_rag_file_ids(
-                    knowledge_base.name,
-                    [r.id for r in rag_files],
-                )
-            except Exception as e:
-                logger.error("删除 Milvus 数据失败: %s", e)
+            if kb_type == RagType.DOCUMENT.value:
+                try:
+                    delete_chunks_by_rag_file_ids(
+                        kb_name,
+                        [r.id for r in rag_files],
+                    )
+                except Exception as e:
+                    logger.error("删除 Milvus 数据失败: %s", e)
+            elif kb_type == RagType.GRAPH.value:
+                try:
+                    from app.module.rag.service.strategy.graph_strategy import GraphKnowledgeBaseStrategy
+                    strategy = GraphKnowledgeBaseStrategy(self.db)
+                    rag_instance = await strategy._get_or_create_graph_rag(knowledge_base)
+                    for rag_file in rag_files:
+                        doc_id = str(rag_file.id)
+                        await rag_instance.adelete_by_doc_id(doc_id)
+                        logger.info("已从知识图谱删除文件: %s, doc_id=%s", rag_file.file_name, doc_id)
+                except Exception as e:
+                    logger.error("删除知识图谱数据失败: %s", e)
 
-        # 删除数据库记录
         for file_id in request.file_ids:
             try:
                 await self.file_repo.delete(file_id)
@@ -346,3 +395,94 @@ class KnowledgeBaseService:
 
         await self.db.commit()
         logger.info("成功删除 %d 个文件", len(rag_files))
+
+    async def update_chunk(
+        self,
+        knowledge_base_id: str,
+        chunk_id: str,
+        text: str,
+        metadata: dict = None,
+    ) -> None:
+        """更新指定分块的文本和元数据
+
+        Args:
+            knowledge_base_id: 知识库 ID
+            chunk_id: 分块 ID
+            text: 新的文本内容
+            metadata: 新的元数据（可选）
+        """
+        knowledge_base = await self.kb_repo.get_by_id(knowledge_base_id)
+        if not knowledge_base:
+            raise BusinessError(ErrorCodes.RAG_KNOWLEDGE_BASE_NOT_FOUND)
+
+        if knowledge_base.type != RagType.DOCUMENT.value:
+            raise BusinessError(
+                ErrorCodes.RAG_INVALID_REQUEST,
+                f"知识库类型 {knowledge_base.type} 不支持分块更新"
+            )
+
+        from app.module.system.service.common_service import get_model_by_id
+        import asyncio
+
+        embedding_entity = await get_model_by_id(self.db, knowledge_base.embedding_model)
+        if not embedding_entity:
+            raise BusinessError(ErrorCodes.RAG_MODEL_NOT_FOUND)
+
+        embedding = EmbeddingFactory.create_embeddings(
+            model_name=str(embedding_entity.model_name),
+            base_url=getattr(embedding_entity, "base_url", None),
+            api_key=getattr(embedding_entity, "api_key", None),
+        )
+
+        await asyncio.to_thread(
+            update_chunk_by_id,
+            collection_name=str(knowledge_base.name),
+            chunk_id=chunk_id,
+            text=text,
+            metadata=metadata,
+            embedding_instance=embedding,
+        )
+
+        logger.info(
+            "成功更新分块: kb=%s chunk_id=%s",
+            knowledge_base_id, chunk_id
+        )
+
+    async def delete_chunk(
+        self,
+        knowledge_base_id: str,
+        chunk_id: str,
+    ) -> None:
+        """删除指定分块
+
+        Args:
+            knowledge_base_id: 知识库 ID
+            chunk_id: 分块 ID
+        """
+        knowledge_base = await self.kb_repo.get_by_id(knowledge_base_id)
+        if not knowledge_base:
+            raise BusinessError(ErrorCodes.RAG_KNOWLEDGE_BASE_NOT_FOUND)
+
+        if knowledge_base.type != RagType.DOCUMENT.value:
+            raise BusinessError(
+                ErrorCodes.RAG_INVALID_REQUEST,
+                f"知识库类型 {knowledge_base.type} 不支持分块删除"
+            )
+
+        import asyncio
+        rag_file_id = await asyncio.to_thread(
+            delete_chunk_by_id,
+            collection_name=str(knowledge_base.name),
+            chunk_id=chunk_id,
+        )
+
+        if rag_file_id:
+            rag_file = await self.file_repo.get_by_id(rag_file_id)
+            if rag_file and rag_file.chunk_count and rag_file.chunk_count > 0:
+                rag_file.chunk_count = rag_file.chunk_count - 1
+                await self.db.commit()
+
+        logger.info(
+            "成功删除分块: kb=%s chunk_id=%s",
+            knowledge_base_id, chunk_id
+        )

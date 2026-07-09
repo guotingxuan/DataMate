@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useLayoutEffect, useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { Database } from "lucide-react";
-import { Card, Button, Tag, Tooltip, Popconfirm } from "antd";
+import { Card, Button, Tag, Tooltip, Modal, Popover } from "antd";
 import type { ItemType } from "antd/es/menu/interface";
 import AddTagPopover from "./AddTagPopover";
 import ActionDropdown from "./ActionDropdown";
@@ -20,13 +20,21 @@ interface OperationItem {
   onMenuClick?: (key: string) => void;
   onClick?: () => void;
   danger?: boolean;
+  confirm?: {
+    title: string;
+    description?: string;
+    cancelText?: string;
+    okText?: string;
+    okType?: "default" | "primary" | "danger";
+    onConfirm?: () => void;
+  };
 }
 
 interface TagConfig {
   showAdd: boolean;
-  tags: Array<{ id: number; name: string; color: string } | string>;
+  tags: Array<{ id: string; name: string; color: string } | string>;
   onFetchTags?: () => Promise<{
-    data: { id: number; name: string; color: string }[];
+    data: { id: string; name: string; color: string }[];
   }>;
   onAddTag?: (tag: string) => void;
   onCreateAndTag?: (tagName: string) => void;
@@ -36,123 +44,175 @@ interface DetailHeaderProps<T> {
   statistics: StatisticItem[];
   operations: OperationItem[];
   tagConfig?: TagConfig;
+  titleExtra?: React.ReactNode;
 }
 
 // 标签单行渲染组件
-const TagsInline = ({ tags }: { tags: Array<{ id: number; name: string; color: string } | string> }) => {
-  const [visibleTags, setVisibleTags] = useState<any[]>([]);
-  const [hiddenCount, setHiddenCount] = useState(0);
+const TagsInline = ({ tags }: { tags: Array<{ id: string; name: string; color: string } | string> }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const tagsAreaRef = useRef<HTMLDivElement>(null);
+  const [visibleTags, setVisibleTags] = useState<typeof tags>([]);
+  const [hiddenCount, setHiddenCount] = useState(0);
+  const [initialized, setInitialized] = useState(false);
 
-  useEffect(() => {
-    if (!tags || tags.length === 0) return;
+  const calculateVisibleTags = useCallback(() => {
+    if (!tags || tags.length === 0) {
+      setVisibleTags([]);
+      setHiddenCount(0);
+      return;
+    }
 
-    const calculateVisibleTags = () => {
-      if (!containerRef.current) return;
+    if (!containerRef.current) return;
 
-      const container = containerRef.current;
+    // 创建测量容器
+    const measureContainer = document.createElement("div");
+    measureContainer.style.position = "absolute";
+    measureContainer.style.visibility = "hidden";
+    measureContainer.style.pointerEvents = "none";
+    measureContainer.style.display = "inline-flex";
+    measureContainer.style.alignItems = "center";
+    measureContainer.style.gap = "4px";
+    measureContainer.style.whiteSpace = "nowrap";
+    measureContainer.style.zIndex = "-1";
+    document.body.appendChild(measureContainer);
 
-      // 创建一个隐藏的测量容器
-      const measureContainer = document.createElement("div");
-      measureContainer.style.position = "absolute";
-      measureContainer.style.visibility = "hidden";
-      measureContainer.style.pointerEvents = "none";
-      measureContainer.style.top = "0";
-      measureContainer.style.left = "0";
-      measureContainer.style.display = "inline-flex";
-      measureContainer.style.alignItems = "center";
-      measureContainer.style.gap = "4px";
-      measureContainer.style.whiteSpace = "nowrap";
-      measureContainer.style.flexWrap = "nowrap";
-      measureContainer.style.zIndex = "-1";
+    // 测量 "+n" 标签
+    const plusTag = document.createElement("span");
+    plusTag.className = "ant-tag ant-tag-default";
+    plusTag.textContent = "+99";
+    measureContainer.appendChild(plusTag);
+    const plusWidth = plusTag.offsetWidth;
 
-      // 创建 "+n" 标签来测量
-      const plusTag = document.createElement("span");
-      plusTag.className = "ant-tag ant-tag-default cursor-pointer bg-gray-100 border-gray-300 text-gray-600 hover:bg-gray-200";
-      plusTag.textContent = "+99";
-      measureContainer.appendChild(plusTag);
-      const plusWidth = plusTag.offsetWidth;
+    // 总容器宽度
+    const totalWidth = 450;
+    // 预留"+n"标签的完整空间（使用更保守的估计）
+    // "+n"标签的实际宽度 ≈ 35-50px，预留 60px 确保安全
+    const availableWidth = totalWidth - 60;
 
-      // 暂时插入到 DOM 中测量
-      if (container.parentElement) {
-        container.parentElement.style.position = "relative";
-        container.parentElement.appendChild(measureContainer);
+    // 先计算所有标签的总宽度
+    let tagsTotalWidth = 0;
+    tags.forEach((tag) => {
+      const tagEl = document.createElement("span");
+      tagEl.className = "ant-tag ant-tag-default";
+      const tagName = typeof tag === "string" ? tag : tag.name;
+      tagEl.textContent = tagName;
+      measureContainer.appendChild(tagEl);
+      tagsTotalWidth = measureContainer.offsetWidth;
+    });
 
-        const containerWidth = container.offsetWidth;
-        const availableWidth = containerWidth - 8; // 安全边距
-
-        let visibleCount = 0;
-
-        tags.forEach((tag, index) => {
-          const tagEl = document.createElement("span");
-          tagEl.className = "ant-tag ant-tag-default shrink-0";
-          const tagName = typeof tag === "string" ? tag : tag.name;
-          const tagColor = typeof tag === "string" ? undefined : tag.color;
-          if (tagColor) tagEl.style.color = tagColor;
-          tagEl.textContent = tagName;
-          measureContainer.appendChild(tagEl);
-
-          // 测量当前容器宽度
-          const currentWidth = measureContainer.offsetWidth;
-          const needsPlus = index < tags.length - 1;
-          const targetWidth = availableWidth - (needsPlus ? plusWidth : 0);
-
-          if (currentWidth <= targetWidth) {
-            visibleCount++;
-          } else {
-            // 移除这个标签，因为它放不下
-            measureContainer.removeChild(tagEl);
-            return false; // 停止循环
-          }
-
-          return true;
-        });
-
-        // 移除测量容器
-        container.parentElement.removeChild(measureContainer);
-
-        setVisibleTags(tags.slice(0, visibleCount));
-        setHiddenCount(tags.length - visibleCount);
+    // 如果所有标签都能放下，直接显示全部
+    if (tagsTotalWidth <= availableWidth) {
+      setVisibleTags(tags);
+      setHiddenCount(0);
+      if (measureContainer.parentNode) {
+        measureContainer.parentNode.removeChild(measureContainer);
       }
-    };
+      return;
+    }
 
-    const timer = setTimeout(calculateVisibleTags, 0);
-    const handleResize = () => calculateVisibleTags();
+    // 如果放不下，需要计算可见标签数量
+    while (measureContainer.firstChild) {
+      measureContainer.removeChild(measureContainer.firstChild);
+    }
 
-    window.addEventListener("resize", handleResize);
-    return () => {
-      clearTimeout(timer);
-      window.removeEventListener("resize", handleResize);
-    };
+    let visibleCount = 0;
+
+    tags.forEach((tag, index) => {
+      const tagEl = document.createElement("span");
+      tagEl.className = "ant-tag ant-tag-default";
+      const tagName = typeof tag === "string" ? tag : tag.name;
+      tagEl.textContent = tagName;
+      measureContainer.appendChild(tagEl);
+
+      const currentWidth = measureContainer.offsetWidth;
+
+      if (currentWidth <= availableWidth) {
+        visibleCount++;
+      } else {
+        measureContainer.removeChild(tagEl);
+        return false;
+      }
+      return true;
+    });
+
+    if (measureContainer.parentNode) {
+      measureContainer.parentNode.removeChild(measureContainer);
+    }
+
+    setVisibleTags(tags.slice(0, visibleCount));
+    setHiddenCount(tags.length - visibleCount);
   }, [tags]);
+
+  useLayoutEffect(() => {
+    calculateVisibleTags();
+    setInitialized(true);
+  }, [calculateVisibleTags]);
+
+  useLayoutEffect(() => {
+    const handleResize = () => calculateVisibleTags();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [calculateVisibleTags]);
 
   if (!tags || tags.length === 0) return null;
 
+  const displayTags = initialized ? visibleTags : tags;
+
+  // 获取隐藏的标签名称
+  const hiddenTagNames = useMemo(() => {
+    if (!tags || hiddenCount === 0) return [];
+    const visibleSet = new Set(visibleTags.map(t => typeof t === 'string' ? t : t.name));
+    return tags.filter(t => {
+      const name = typeof t === 'string' ? t : t.name;
+      return !visibleSet.has(name);
+    }).map(t => typeof t === 'string' ? t : t.name);
+  }, [tags, visibleTags, hiddenCount]);
+
   return (
-    <div
-      ref={containerRef}
-      className="inline-flex items-center gap-1 overflow-hidden"
-      style={{ whiteSpace: "nowrap", flexWrap: "nowrap" } }
-    >
-      {visibleTags.map((tag, index) => {
-        const tagName = typeof tag === "string" ? tag : tag.name;
-        const tagColor = typeof tag === "string" ? undefined : tag.color;
-        return (
-          <Tag
-            key={`${typeof tag === "string" ? tag : tag.id}-${index}`}
-            color={tagColor}
-            className="shrink-0"
-          >
-            {tagName}
-          </Tag>
-        );
-      })}
-      {hiddenCount > 0 && (
-        <Tooltip title={`还有 ${hiddenCount} 个标签`}>
-          <Tag className="cursor-pointer bg-gray-100 border-gray-300 text-gray-600 hover:bg-gray-200 shrink-0">
+    <div ref={containerRef} className="inline-flex items-center" style={{ whiteSpace: "nowrap", maxWidth: 450 }}>
+      <div
+        ref={tagsAreaRef}
+        className="inline-flex items-center gap-1 flex-1"
+        style={{ overflow: "hidden", minWidth: 0 }}
+      >
+        {displayTags.map((tag, index) => {
+          const tagName = typeof tag === "string" ? tag : tag.name;
+          const tagColor = typeof tag === "string" ? undefined : tag.color;
+          return (
+            <Tag
+              key={`${typeof tag === "string" ? tag : tag.id}-${index}`}
+              color={tagColor}
+              className="shrink-0"
+            >
+              {tagName}
+            </Tag>
+          );
+        })}
+      </div>
+      {initialized && hiddenCount > 0 && (
+        <Popover
+          content={
+            <div className="max-w-xs">
+              <div className="flex flex-wrap gap-1">
+                {hiddenTagNames.map((name, i) => (
+                  <Tag
+                    key={i}
+                    className="bg-gray-100 border-gray-300 text-gray-600"
+                  >
+                    {name}
+                  </Tag>
+                ))}
+              </div>
+            </div>
+          }
+          title="更多标签"
+          trigger="hover"
+          placement="topLeft"
+        >
+          <Tag className="cursor-pointer bg-gray-100 border-gray-300 text-gray-600 hover:bg-gray-200 shrink-0 ml-1">
             +{hiddenCount}
           </Tag>
-        </Tooltip>
+        </Popover>
       )}
     </div>
   );
@@ -163,6 +223,7 @@ function DetailHeader<T>({
   statistics,
   operations,
   tagConfig,
+  titleExtra,
 }: DetailHeaderProps<T>): React.ReactNode {
   return (
     <Card>
@@ -185,6 +246,7 @@ function DetailHeader<T>({
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 mb-1">
               <h1 className="text-lg font-bold text-gray-900 truncate">{(data as any)?.name}</h1>
+              {titleExtra}
               {(data as any)?.status && (
                 <Tag color={(data as any).status?.color} className="shrink-0">
                   <div className="flex items-center gap-2 text-xs">
@@ -209,8 +271,8 @@ function DetailHeader<T>({
             </div>
             <p className="text-gray-700 mb-4 line-clamp-2">{(data as any)?.description}</p>
             <div className="flex items-center gap-6 text-sm">
-              {statistics.map((stat: any) => (
-                <div key={stat.key} className="flex items-center gap-1 shrink-0">
+              {statistics.map((stat: StatisticItem, index: number) => (
+                <div key={stat.label || index} className="flex items-center gap-1 shrink-0">
                   {stat.icon}
                   <span>{stat.value}</span>
                 </div>
@@ -219,33 +281,41 @@ function DetailHeader<T>({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {operations.map((op: any) => {
+          {operations.map((op: OperationItem) => {
             if (op.isDropdown) {
               return (
                 <ActionDropdown
+                  key={op.key}
                   actions={op?.items}
                   onAction={op?.onMenuClick}
                 />
               );
             }
             if (op.confirm) {
+              const showConfirmModal = () => {
+                Modal.confirm({
+                  title: op.confirm?.title,
+                  content: op.confirm?.description,
+                  okText: op.confirm?.okText,
+                  okType: op.danger ? "danger" : "primary",
+                  cancelText: op.confirm?.cancelText,
+                  centered: true,
+                  onOk: () => {
+                    if (op.onClick) {
+                      op.onClick();
+                    } else {
+                      op?.confirm?.onConfirm?.();
+                    }
+                  },
+                });
+              };
               return (
                 <Tooltip key={op.key} title={op.label}>
-                  <Popconfirm
-                    key={op.key}
-                    {...op.confirm}
-                    onConfirm={() => {
-                      if (op.onClick) {
-                        op.onClick()
-                      } else {
-                        op?.confirm?.onConfirm?.();
-                      }
-                    }}
-                    okType={op.danger ? "danger" : "primary"}
-                    overlayStyle={{ zIndex: 9999 }}
-                  >
-                    <Button icon={op.icon} danger={op.danger} />
-                  </Popconfirm>
+                  <Button
+                    icon={op.icon}
+                    danger={op.danger}
+                    onClick={showConfirmModal}
+                  />
                 </Tooltip>
               );
             }

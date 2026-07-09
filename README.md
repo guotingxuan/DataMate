@@ -37,6 +37,48 @@ If you like this project, please give it a Star⭐️!
 - Docker-Compose (for service deployment - Docker method)
 - Kubernetes (for service deployment - k8s method)
 - Helm (for service deployment - k8s method)
+- **K8s deployment additionally requires**: [Sealed Secrets Controller](https://github.com/bitnami-labs/sealed-secrets) (for encrypted secret management)
+
+### Secret Management (K8s deployment only)
+
+DataMate K8s deployment uses **Bitnami Sealed Secrets** to manage sensitive configuration such as database passwords and JWT secrets. All secrets are stored in encrypted form in Git (`deployment/kubernetes/sealed-secrets/`) and automatically decrypted by the Sealed Secrets Controller in the cluster at deploy time.
+
+**Online environment - install Sealed Secrets Controller:**
+
+```bash
+# Install via Helm (recommended)
+helm repo add sealed-secrets https://bitnami-labs.github.io/sealed-secrets
+helm install sealed-secrets sealed-secrets/sealed-secrets -n kube-system
+
+# Verify installation
+kubectl get pods -n kube-system | grep sealed-secrets
+```
+
+**Air-gapped / offline environment:**
+
+1. Download the Sealed Secrets image on an internet-connected machine:
+   ```bash
+   # Download controller image (~60MB)
+   docker pull bitnami/sealed-secrets-controller:latest
+   docker save bitnami/sealed-secrets-controller:latest -o sealed-secrets-controller.tar
+   
+   # Download kubeseal CLI (for updating secrets)
+   # macOS:
+   brew install kubeseal
+   # Linux:
+   wget https://github.com/bitnami-labs/sealed-secrets/releases/latest/download/kubeseal-linux-amd64
+   ```
+
+2. Transfer the image to your offline registry, then install via Helm with the custom image reference.
+
+**Updating secrets:**
+
+```bash
+# When passwords change, re-encrypt with kubeseal
+echo -n "new-password" | kubeseal --raw --name datamate-conf --namespace datamate --scope namespace-wide
+```
+
+> Note: Docker deployments do not require Sealed Secrets — secrets are managed via the `.env` file (excluded from Git via `.gitignore`).
 
 ### Docker Quick deploy
 ```shell
@@ -113,10 +155,33 @@ make uninstall
 
 When running make uninstall, the installer will prompt once whether to delete volumes; that single choice is applied to all components. The uninstall order is: milvus -> label-studio -> datamate, which ensures the datamate network is removed cleanly after services that use it have stopped.
 
+## 📚 Documentation
+
+### Core Documentation
+- **[DEVELOPMENT.md](./DEVELOPMENT.md)** - Local development environment setup and workflow
+- **[AGENTS.md](./AGENTS.md)** - AI assistant guidelines and code style
+
+### Backend Documentation
+- **[backend/README.md](./backend/README.md)** - Backend architecture, services, and technology stack
+- **[backend/api-gateway/README.md](./backend/api-gateway/README.md)** - API Gateway configuration and routing
+- **[backend/services/main-application/README.md](./backend/services/main-application/README.md)** - Main application modules
+- **[backend/shared/README.md](./backend/shared/README.md)** - Shared libraries (domain-common, security-common)
+
+### Runtime Documentation
+- **[runtime/README.md](./runtime/README.md)** - Runtime architecture and components
+- **[runtime/datamate-python/README.md](./runtime/datamate-python/README.md)** - FastAPI backend service
+- **[runtime/python-executor/README.md](./runtime/python-executor/README.md)** - Ray executor framework
+- **[runtime/ops/README.md](./runtime/ops/README.md)** - Operator ecosystem
+- **[runtime/datax/README.md](./runtime/datax/README.md)** - DataX data framework
+- **[runtime/deer-flow/README.md](./runtime/deer-flow/README.md)** - DeerFlow LLM service
+
+### Frontend Documentation
+- **[frontend/README.md](./frontend/README.md)** - React frontend application
+
 ## 🤝 Contribution Guidelines
 
 Thank you for your interest in this project! We warmly welcome contributions from the community. Whether it's submitting
-bug reports, suggesting new features, or directly participating in code development, all forms of help make the project
+bug reports, suggesting new features, or directly participating in code development, all forms of help make a project
 better.
 
 • 📮 [GitHub Issues](../../issues): Submit bugs or feature suggestions.

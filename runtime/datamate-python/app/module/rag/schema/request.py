@@ -330,6 +330,37 @@ class PagingQuery(BaseModel):
         }
 
 
+class ChunkFilterQuery(BaseModel):
+    """分块过滤查询请求
+
+    支持分页和 Milvus 表达式过滤
+    """
+    page: int = Field(
+        default=1,
+        ge=1,
+        description="页码（从 1 开始）"
+    )
+    size: int = Field(
+        default=10,
+        ge=1,
+        le=100,
+        description="每页数量"
+    )
+    expr: Optional[str] = Field(
+        None,
+        description="Milvus 过滤表达式（如 id > \"1\" && text like \"%keyword%\"）"
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "page": 1,
+                "size": 10,
+                "expr": "id > \"1\""
+            }
+        }
+
+
 class QueryRequest(BaseModel):
     """知识图谱查询请求"""
     knowledge_base_id: str = Field(..., description="知识库ID")
@@ -340,5 +371,23 @@ class QueryRequest(BaseModel):
             "example": {
                 "knowledge_base_id": "kb-uuid-123",
                 "query": "什么是机器学习？"
+            }
+        }
+
+
+class ChunkUpdateReq(BaseModel):
+    """Chunk更新请求"""
+    text: str = Field(..., min_length=1, description="分块文本内容")
+    metadata: Optional[dict] = Field(default=None, description="元数据")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "text": "这是修改后的分块内容...",
+                "metadata": {
+                    "fileName": "document.pdf",
+                    "chunkIndex": 0,
+                    "customField": "custom value"
+                }
             }
         }

@@ -18,10 +18,12 @@ export enum DatasetSubType {
 }
 
 export enum DatasetStatus {
-  ACTIVE = "ACTIVE",
-  INACTIVE = "INACTIVE",
-  PROCESSING = "PROCESSING",
   DRAFT = "DRAFT",
+  ACTIVE = "ACTIVE",
+  PROCESSING = "PROCESSING",
+  ARCHIVED = "ARCHIVED",
+  PUBLISHED = "PUBLISHED",
+  DEPRECATED = "DEPRECATED",
 }
 
 export enum DataSource {
@@ -93,6 +95,7 @@ export interface DatasetTask {
 
 export interface TaskItem {
   key: string;
+  datasetId?: string; // 数据集 ID（用于 API 调用）
   title: string;
   percent: number;
   reqId: number;
@@ -102,4 +105,5 @@ export interface TaskItem {
   updateEvent?: string;
   size?: number;
   hasArchive?: boolean;
+  prefix?: string; // 当前路径前缀
 }

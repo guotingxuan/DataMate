@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Table, Progress, Badge, Button, Tooltip, Card, App } from "antd";
+import { Table, Progress, Badge, Button, Tooltip, Card, App, Modal } from "antd";
 import {
   PlayCircleOutlined,
   PauseCircleOutlined,
@@ -27,6 +27,18 @@ export default function TaskList() {
   const navigate = useNavigate();
   const { message } = App.useApp();
   const [viewMode, setViewMode] = useState<"card" | "list">("card");
+
+  // 删除确认弹窗状态
+  const [deleteModal, setDeleteModal] = useState<{
+    visible: boolean;
+    taskId: string;
+    taskName: string;
+  }>({
+    visible: false,
+    taskId: "",
+    taskName: "",
+  });
+
   const filterOptions = [
     {
       key: "status",
@@ -59,51 +71,63 @@ export default function TaskList() {
   };
 
   const deleteTask = async (item: CleansingTask) => {
-    await deleteCleaningTaskByIdUsingDelete(item.id);
-    message.success(t("dataCleansing.task.messages.taskDeleted"));
-    fetchData();
+    setDeleteModal({
+      visible: true,
+      taskId: item.id,
+      taskName: item.name,
+    });
   };
 
-  useEffect(() => {
-    fetchData();
-  }, [t]);
+  const handleConfirmDelete = async () => {
+    try {
+      await deleteCleaningTaskByIdUsingDelete(deleteModal.taskId);
+      message.success(t("dataCleansing.task.messages.taskDeleted"));
+      setDeleteModal({ visible: false, taskId: "", taskName: "" });
+      fetchData();
+    } catch (error) {
+      message.error(t("dataCleansing.task.messages.deleteFailed"));
+    }
+  };
+
+  const handleCancelDelete = () => {
+    setDeleteModal({ visible: false, taskId: "", taskName: "" });
+  };
 
   const taskOperations = (record: CleansingTask) => {
     const isRunning = record.status?.value === TaskStatus.RUNNING;
     const showStart = [
       TaskStatus.PENDING,
+      TaskStatus.PARTIAL_SUCCESS,
       TaskStatus.FAILED,
       TaskStatus.STOPPED,
     ].includes(record.status?.value);
-    const isComplete = record.status?.value === TaskStatus.COMPLETED;
     const pauseBtn = {
       key: "pause",
       label: t("dataCleansing.actions.pause"),
-      icon: isRunning ? <PauseCircleOutlined /> : <PlayCircleOutlined />,
-      onClick: pauseTask, // implement pause/play logic
+      icon: <PauseCircleOutlined />,
+      onClick: pauseTask,
     };
 
     const startBtn = {
       key: "start",
       label: t("dataCleansing.actions.start"),
-      icon: isRunning ? <PauseCircleOutlined /> : <PlayCircleOutlined />,
-      disabled: isComplete,
-      onClick: startTask, // implement pause/play logic
+      icon: <PlayCircleOutlined />,
+      onClick: startTask,
     };
+
+    const deleteBtn = {
+      key: "delete",
+      label: t("dataCleansing.actions.delete"),
+      icon: <DeleteOutlined />,
+      danger: true,
+      disabled: isRunning, // 运行中的任务禁用删除按钮
+      onClick: deleteTask,
+    };
+
     return [
-      ...(isRunning
-        ? [ pauseBtn ]
-        : []),
-      ...(showStart || isComplete
-        ? [ startBtn ]
-        : []),
-      {
-        key: "delete",
-        label: t("dataCleansing.actions.delete"),
-        danger: true,
-        icon: <DeleteOutlined />,
-        onClick: deleteTask, // implement delete logic
-      },
+      ...(isRunning ? [pauseBtn] : []),
+      ...(showStart ? [startBtn] : []),
+      deleteBtn,
     ];
   };
 
@@ -188,8 +212,11 @@ export default function TaskList() {
       key: "process",
       width: 150,
       render: (_, record: CleansingTask) => {
-          if (record?.status?.value == TaskStatus.FAILED) {
+          if (record?.status?.value === TaskStatus.FAILED) {
               return <Progress percent={record?.progress?.process} size="small" status="exception" />;
+          }
+          if (record?.status?.value === TaskStatus.PARTIAL_SUCCESS) {
+              return <Progress percent={record?.progress?.process} size="small" strokeColor="#f59e0b" />;
           }
           return <Progress percent={record?.progress?.process} size="small"/>;
       },
@@ -311,6 +338,19 @@ export default function TaskList() {
           />
         </Card>
       )}
+
+      {/* 删除确认弹窗 */}
+      <Modal
+        title={t("dataCleansing.task.confirm.deleteTitle")}
+        open={deleteModal.visible}
+        onOk={handleConfirmDelete}
+        onCancel={handleCancelDelete}
+        okText={t("dataManagement.confirm.deleteConfirm")}
+        cancelText={t("dataManagement.confirm.deleteCancel")}
+        okButtonProps={{ danger: true }}
+      >
+        <p>{t("dataCleansing.task.confirm.deleteDesc", { itemName: deleteModal.taskName })}</p>
+      </Modal>
     </>
   );
 }

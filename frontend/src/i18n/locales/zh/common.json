@@ -7,15 +7,22 @@
     "actions": {
       "login": "登录",
       "register": "注册",
-      "logout": "退出登录"
+      "logout": "退出登录",
+      "gotoLogin": "前往登录"
     },
+    "authMode": {
+      "sso": "单点登录",
+      "jwt": "令牌登录"
+    },
+    "group": "用户组",
     "messages": {
       "loginSuccess": "登录成功",
       "loginFailed": "登录失败，请稍后重试",
       "signupSuccess": "注册成功，已自动登录",
       "signupFailed": "注册失败，请稍后重试",
       "logoutSuccess": "已退出登录",
-      "passwordMismatch": "两次输入的密码不一致"
+      "passwordMismatch": "两次输入的密码不一致",
+      "useSSO": "请使用 ModelEngine 单点登录进行注册"
     },
     "loginDialog": {
       "title": "登录",
@@ -94,8 +101,8 @@
         "updateSuccess": "任务更新成功",
         "updateFailed": "任务更新失败",
         "deleteSuccess": "任务已删除",
-        "deleteConfirm": "确定要删除该任务吗？此操作不可撤销。",
-        "deleteConfirmMessage": "确定要删除任务「{{taskName}}」吗？删除后将无法恢复。",
+        "deleteTitle": "确认删除归集任务",
+        "deleteDesc": "删除「{{itemName}}」后将无法恢复，确定要执行此操作吗？",
         "confirmDelete": "删除",
         "cancel": "取消"
       },
@@ -277,6 +284,7 @@
     "description": "创建、导入和管理数据集",
     "actions": {
       "createDataset": "创建数据集",
+      "detail": "详情",
       "edit": "编辑",
       "import": "导入",
       "importData": "导入数据",
@@ -289,7 +297,9 @@
       "rename": "重命名",
       "createFolder": "新建文件夹",
       "cancel": "取消",
-      "confirm": "确定"
+      "confirm": "确定",
+      "renameFile": "重命名文件",
+      "renameFolder": "重命名文件夹"
     },
     "stats": {
       "totalDatasets": "数据集总数",
@@ -372,10 +382,14 @@
       "fileDownloadSuccess": "文件下载成功"
     },
     "confirm": {
-      "deleteDatasetTitle": "确认删除该数据集？",
-      "deleteDatasetDesc": "删除后该数据集将无法恢复，请谨慎操作。",
-      "deleteFolderTitle": "确认删除文件夹？",
-      "deleteFolderDesc": "删除文件夹 \"{{name}}\" 将同时删除其中的所有文件和子文件夹，此操作不可恢复。",
+      "deleteDatasetTitle": "确认删除数据集",
+      "deleteDatasetDesc": "删除「{{itemName}}」后将无法恢复，确定要执行此操作吗？",
+      "deleteFileTitle": "确认删除文件",
+      "deleteFileDesc": "删除「{{itemName}}」后将无法恢复，确定要执行此操作吗？",
+      "deleteFolderTitle": "确认删除文件夹",
+      "deleteFolderDesc": "删除「{{itemName}}」及其所有内容后将无法恢复，确定要执行此操作吗？",
+      "batchDeleteTitle": "确认批量删除",
+      "batchDeleteDesc": "删除选中的 {{count}} 个项目后将无法恢复，确定要执行此操作吗？",
       "deleteConfirm": "删除",
       "deleteCancel": "取消"
     },
@@ -394,7 +408,8 @@
       "previewTitle": "文件预览：{{name}}",
       "previewEmpty": "暂无预览内容，或当前文件类型暂不支持预览。",
       "previewInfoTitle": "文件信息",
-      "editTitle": "编辑数据集 - {{name}}"
+      "editTitle": "编辑数据集 - {{name}}",
+      "datasetDetail": "数据集详细信息"
     },
     "labels": {
       "id": "ID",
@@ -516,7 +531,9 @@
         "statisticsSummary": "共 {{categoryCount}} 个类别，{{totalLabels}} 个标签样本",
         "detailsCardTitle": "标签分布明细",
         "totalLabels": "总计: {{count}} 个标签",
-        "moreLabels": "还有 {{count}} 个标签..."
+        "moreLabels": "还有 {{count}} 个标签...",
+        "paginationTotal": "共 {{total}} 条",
+        "uncategorized": "未分类"
       }
     },
     "import": {
@@ -584,10 +601,12 @@
       "videoJsonl": "用于大规模视频预训练模型的数据集"
     },
     "datasetStatus": {
+      "draft": "草稿",
       "active": "活跃",
       "processing": "处理中",
-      "inactive": "未激活",
-      "draft": "草稿"
+      "archived": "已归档",
+      "published": "已发布",
+      "deprecated": "已弃用"
     },
     "dataSources": {
       "upload": "本地上传",
@@ -595,6 +614,10 @@
     }
   },
   "common": {
+    "yes": "是",
+    "no": "否",
+    "cancel": "取消",
+    "refresh": "刷新",
     "settings": {
       "title": "设置"
     },
@@ -620,6 +643,10 @@
         "pending": "就绪",
         "paused": "已暂停"
       }
+    },
+    "loading": "加载中...",
+    "table": {
+      "file": "文件"
     }
   },
   "ratioTask": {
@@ -648,8 +675,8 @@
         "deleteFailed": "任务删除失败，请稍后重试"
       },
       "confirm": {
-        "deleteTitle": "确认删除该任务？",
-        "deleteDesc": "删除后该任务将无法恢复，请谨慎操作。",
+        "deleteTitle": "确认删除配比任务",
+        "deleteDesc": "删除「{{itemName}}」后将无法恢复，确定要执行此操作吗？",
         "okText": "删除",
         "cancelText": "取消"
       },
@@ -734,8 +761,8 @@
         "delete": "删除"
       },
       "confirm": {
-        "deleteTitle": "确认删除该配比任务？",
-        "deleteDesc": "删除后该任务将无法恢复，请谨慎操作。",
+        "deleteTitle": "确认删除配比任务",
+        "deleteDesc": "删除「{{itemName}}」后将无法恢复，确定要执行此操作吗？",
         "okText": "删除",
         "cancelText": "取消"
       },
@@ -1141,7 +1168,8 @@
         "createFailed": "创建失败，请稍后重试",
         "autoCreateSuccess": "自动标注任务创建成功",
         "autoCreateFailed": "创建自动标注任务失败",
-        "datasetTypeFiltered": "已根据模板类型筛选数据集，请重新选择数据集和文件"
+        "datasetTypeFiltered": "已根据模板类型筛选数据集，请重新选择数据集和文件",
+        "datasetTypeMismatch": "模板类型与数据集类型不匹配，请选择匹配的模板或数据集"
       }
     },
     "template": {
@@ -1223,8 +1251,28 @@
       },
       "messages": {
         "deleteSuccess": "自动标注任务删除成功",
-        "deleteFailed": "删除失败，请稍后重试"
-      }
+        "deleteFailed": "删除失败，请稍后重试",
+        "cannotJumpNoBase": "无法跳转到 Label Studio：未配置 Label Studio 基础 URL",
+        "downloadFailed": "下载失败",
+        "downloadPreparing": "正在准备下载...",
+        "downloadStarted": "下载已开始",
+        "fetchTasksFailed": "获取任务失败",
+        "noDatasetBound": "该自动标注任务未绑定数据集",
+        "noProjectFound": "未找到对应的标注工程",
+        "outputPath": "输出路径",
+        "processedImages": "已处理图片",
+        "resultPathTitle": "结果路径",
+        "syncFailed": "同步失败",
+        "syncLoading": "正在同步...",
+        "syncSuccess": "同步成功",
+        "syncToDbTitle": "确认将标注结果同步到数据库？",
+        "syncToDbContent1": "此操作会根据 Label Studio 中的任务数据覆盖当前文件标签与标注信息",
+        "syncToDbContent2": "同步完成后，可在数据管理的文件详情中查看最新标签与标注"
+      },
+      "downloadResult": "下载结果",
+      "viewResult": "查看结果",
+      "refresh": "刷新",
+      "more": "更多"
     },
     "annotate": {
       "title": "标注工作台",
@@ -1251,12 +1299,32 @@
         "import": "导入",
         "loading": "导入中...",
         "success": "导入成功",
-        "failed": "导入失败，请稍后重试"
+        "failed": "导入失败，请稍后重试",
+        "exportFormat": "导出格式",
+        "exportFormatRequired": "请选择导出格式",
+        "fileNameLabel": "文件名",
+        "fileNamePlaceholder": "请输入文件名",
+        "taskLabel": "标注任务",
+        "taskLabelAuto": "自动标注任务"
       },
       "syncToDb": {
         "loading": "正在从 Label Studio 同步标注到数据库...",
         "success": "同步完成",
         "fail": "同步失败，请稍后重试"
+      },
+      "customTemplate": {
+        "title": "自定义模板",
+        "nameLabel": "模板名称",
+        "namePlaceholder": "请输入模板名称",
+        "nameRequired": "请输入模板名称",
+        "descriptionLabel": "模板描述",
+        "descriptionPlaceholder": "请输入模板描述",
+        "codeLabel": "模板代码",
+        "codePlaceholder": "请输入模板代码",
+        "codeRequired": "请输入模板代码",
+        "previewLabel": "预览",
+        "okText": "确定",
+        "saveSuccess": "保存成功"
       }
     },
     "const": {
@@ -1296,7 +1364,8 @@
         "averageTime": "平均时长",
         "reviewCount": "待复核"
       }
-    }
+    },
+    "title": "数据标注"
   },
   "dataCleansing": {
     "title": "数据处理",
@@ -1327,20 +1396,25 @@
       "pause": "暂停",
       "compare": "对比",
       "download": "下载",
-      "delete": "删除",
       "batchDownload": "批量下载",
+      "delete": "删除",
       "edit": "编辑",
       "selectAll": "全选",
       "search": "搜索",
       "reset": "重置",
       "config": "参数配置",
-      "selectOperatorConfig": "请选择一个算子进行参数配置"
+      "selectOperatorConfig": "请选择一个算子进行参数配置",
+      "actions": "操作"
     },
     "steps": {
       "basicInfo": "基本信息",
       "operatorOrchestration": "算子编排"
     },
     "task": {
+      "sections": {
+        "taskInfo": "任务信息",
+        "dataSourceSelection": "数据源选择"
+      },
       "columns": {
         "taskName": "任务名称",
         "taskId": "任务ID",
@@ -1367,21 +1441,32 @@
         "destDatasetName": "目标数据集名称",
         "destDatasetNamePlaceholder": "输入或选择目标数据集名称",
         "destDatasetType": "目标数据集类型",
-        "destDatasetTypeRequired": "请选择目标数据集类型"
-      },
-      "sections": {
-        "taskInfo": "任务信息",
-        "dataSourceSelection": "数据源选择"
+        "destDatasetTypeRequired": "请选择目标数据集类型",
+        "useSourceDataset": "选择源数据集",
+        "useSourceDatasetHint": "勾选后目标数据集将使用源数据集，不可修改",
+        "destDatasetNameRequired": "请输入目标数据集名称",
+        "cannotUseSourceDataset": "不能使用源数据集作为目标数据集，请勾选\"选择源数据集\"或输入其他名称",
+        "allTypes": "全部",
+        "showingDatasets": "显示 {{count}} 个数据集",
+        "noDatasetsFound": "未找到匹配的数据集"
       },
       "messages": {
-        "taskCreated": "任务已创建",
-        "taskStarted": "任务已启动",
-        "taskPaused": "任务已暂停",
-        "taskDeleted": "任务已删除",
+        "fetchTaskLogFailed": "获取任务日志失败",
+        "fetchTaskResultFailed": "获取任务结果失败",
+        "taskCreated": "任务创建成功",
+        "taskDeleted": "任务删除成功",
         "taskDetailFailed": "获取任务详情失败",
-        "fetchTaskResultFailed": "获取数据处理结果失败",
-        "fetchTaskLogFailed": "获取数据处理日志失败"
+        "taskPaused": "任务已暂停",
+        "taskStarted": "任务已启动",
+        "deleteFailed": "任务删除失败，请稍后重试"
+      },
+      "confirm": {
+        "deleteTitle": "确认删除数据处理任务",
+        "deleteDesc": "删除「{{itemName}}」后将无法恢复，确定要执行此操作吗？"
       }
+    },
+    "create": {
+      "typeMismatch": "类型不兼容：上一个算子输出类型为「{{from}}」，当前算子输入类型为「{{to}}」"
     },
     "template": {
       "columns": {
@@ -1424,13 +1509,17 @@
         "processedFileType": "处理后文件类型",
         "beforeSize": "处理前大小",
         "afterSize": "处理后大小",
+        "result": "处理结果",
+        "resultDetail": "处理结果详情",
         "status": "状态",
         "actions": "操作",
         "searchFileName": "搜索文件名",
         "searchFileType": "搜索文件类型",
         "selectFiles": "已选择 {{count}} 个文件",
+        "selectedFilesCount": "已选择 {{count}} 个文件",
         "notCompleted": "未完成",
         "downloadNotAvailable": "暂未开放",
+        "downloadFilesFailed": "下载文件失败",
         "compareDialogTitle": "文件对比 - {{fileName}}",
         "beforeProcessing": "处理前",
         "afterProcessing": "处理后",
@@ -1446,7 +1535,10 @@
         "selectRun": "选择运行轮次",
         "currentDisplay": "当前展示: 第 {{num}} 次",
         "nthRun": "第 {{num}} 次",
-        "noLogs": "当前任务无可用日志"
+        "noLogs": "当前任务无可用日志",
+        "streaming": "实时输出中...",
+        "download": "下载日志",
+        "downloadFailed": "下载日志文件失败"
       },
       "operatorTable": {
         "serialNumber": "序号",
@@ -1512,10 +1604,17 @@
     },
     "status": {
       "completed": "已完成",
+      "partialSuccess": "部分成功",
       "failed": "失败",
       "running": "运行中",
       "pending": "等待中",
       "stopped": "已停止"
+    },
+    "logTable": {
+      "nthRun": "第{{n}}次运行"
+    },
+    "paramConfig": {
+      "enterValue": "请输入值"
     }
   },
   "knowledgeBase": {
@@ -1567,6 +1666,8 @@
       "confirm": {
         "deleteTitle": "确认删除该知识库吗？",
         "deleteDescription": "删除后将无法恢复，请谨慎操作。",
+        "deleteFileTitle": "确认删除该文件吗？",
+        "deleteFileDescription": "确定要删除文件「{{name}}」吗？删除后将无法恢复。",
         "okText": "删除",
         "cancelText": "取消"
       },
@@ -1610,16 +1711,38 @@
       "actions": {
         "download": "下载",
         "save": "保存",
-        "cancel": "取消"
+        "cancel": "取消",
+        "confirm": "确认",
+        "formatJson": "格式化",
+        "view": "查看",
+        "edit": "编辑",
+        "delete": "删除"
       },
       "messages": {
         "noChunks": "暂无分块数据",
         "chunkCount": "个分块",
+        "totalChunks": "共 {{count}} 个分块",
+        "showingRange": "当前显示第 {{start}}-{{end}} 个",
         "ready": "就绪",
         "previousPage": "上一页",
         "nextPage": "下一页",
         "chunkLabel": "分块",
-        "loadFailed": "加载失败"
+        "loadFailed": "加载失败",
+        "updateSuccess": "分块更新成功",
+        "updateFailed": "分块更新失败",
+        "deleteSuccess": "分块删除成功",
+        "deleteFailed": "分块删除失败",
+        "invalidMetadata": "元数据JSON格式无效",
+        "invalidMetadataFormat": "元数据不是有效的JSON格式",
+        "textRequired": "分块内容不能为空",
+        "formatSuccess": "JSON格式化成功",
+        "metadataHint": "请输入有效的JSON格式数据，点击\"格式化\"按钮可自动整理格式",
+        "jsonValid": "JSON格式正确",
+        "jsonInvalid": "JSON格式错误"
+      },
+      "placeholders": {
+        "chunkContent": "请输入分块内容",
+        "metadata": "请输入元数据（JSON格式）"
       },
       "modal": {
         "sliceTraceTitle": "知识切片回溯",
@@ -1634,11 +1757,23 @@
         "position": "位置",
         "tokenCount": "Token数量",
         "pageNumber": "页码",
-        "chapter": "章节"
+        "chapter": "章节",
+        "deleteConfirmTitle": "确认删除分块",
+        "deleteConfirmMessage": "确定要删除这个分块吗？此操作将同时删除Milvus中的向量数据，且无法恢复。",
+        "editChunkTitle": "编辑分块"
       },
       "breadcrumb": {
         "kbList": "知识库",
         "kbDetail": "知识库详情"
+      },
+      "defaultFileName": "文件 {{id}}",
+      "filter": {
+        "title": "过滤",
+        "idOperator": "ID操作符",
+        "idValue": "ID值",
+        "textKeyword": "文本关键词",
+        "apply": "应用",
+        "clear": "清除"
       }
     },
     "create": {
@@ -1652,6 +1787,8 @@
         "nameLabel": "知识库名称",
         "namePlaceholder": "请输入知识库名称",
         "nameRequired": "请输入知识库名称",
+        "nameMaxLength": "知识库名称长度不能超过255个字符",
+        "namePattern": "知识库名称必须以字母开头，只能包含字母、数字和下划线",
         "descriptionLabel": "描述",
         "descriptionPlaceholder": "请输入知识库描述（可选）",
         "embeddingModelLabel": "索引模型",
@@ -1863,6 +2000,56 @@
         "latestVersion": "最新版本",
         "noReleases": "暂无版本发布信息",
         "initialize": "点击初始化"
+      },
+      "examples": {
+        "copyCode": "复制代码"
+      },
+      "service": {
+        "notSupported": "暂不支持部署",
+        "confirmUninstall": "确认卸载服务？",
+        "uninstallConfirm": "卸载后服务将停止运行，是否继续？",
+        "uninstall": "卸载",
+        "status": {
+          "running": "运行中",
+          "failed": "失败",
+          "standby": "待机",
+          "stopped": "已停止"
+        },
+        "notDeployed": "未部署",
+        "clickToDeploy": "点击部署",
+        "deploy": "部署",
+        "notSupportedHint": "当前算子不支持部署功能",
+        "deploymentInfo": "部署信息",
+        "deployedAt": "部署时间",
+        "version": "版本",
+        "replicas": "副本数",
+        "uninstallService": "卸载服务",
+        "podMonitor": "Pod 监控",
+        "noPods": "暂无 Pod",
+        "createdAt": "创建时间",
+        "cpuUsage": "CPU 使用率",
+        "memoryUsage": "内存使用率",
+        "restartCount": "重启次数",
+        "viewLogs": "查看日志",
+        "deploying": "部署中",
+        "logs": "日志",
+        "copyLogs": "复制日志",
+        "close": "关闭"
+      },
+      "requirement": {
+        "systemRequirements": "系统规格",
+        "cpuSpec": "CPU 规格",
+        "noLimit": "无限制",
+        "memorySpec": "内存规格",
+        "storage": "存储",
+        "gpuSupport": "GPU 支持",
+        "npuSupport": "NPU 支持",
+        "dependencies": "依赖项",
+        "parseError": "数据解析失败"
+      },
+      "reviews": {
+        "basedOn": "基于 {{count}} 条评价",
+        "stars": "{{rating}} 星"
       }
     },
     "create": {
@@ -2141,15 +2328,19 @@
         "cot": "链式推理生成"
       },
       "confirm": {
-        "deleteTitle": "确认删除任务?",
-        "deleteContent": "任务名：{{name}}",
+        "deleteTitle": "确认删除合成任务",
+        "deleteDesc": "删除「{{name}}」后将无法恢复，确定要执行此操作吗？",
         "archiveTitle": "确认归档该合成任务?",
         "archiveContent": "任务名：{{name}}"
       },
       "modal": {
         "evalTitle": "创建评估任务",
         "evalName": "评估任务名称",
-        "evalMethod": "评估方式",
+        "evalMethod": {
+          "auto": "自动评估",
+          "cot": "CoT 评估",
+          "qa": "QA 评估"
+        },
         "evalModel": "评估模型",
         "evalSource": "来源：合成任务（SYNTHESIS）",
         "sourceName": "源名称：{{name}}",
@@ -2166,7 +2357,10 @@
           "grammarErrorDesc": "问题为疑问句，答案为陈述句；不存在词语搭配不当的情况；连接词和标点符号不存在错用情况；逻辑混乱的情况不存在；语法结构都正确且完整。",
           "answerRelevance": "回答是否有针对性",
           "answerRelevanceDesc": "回答应对问题中的所有疑问点提供正面、直接的回答，不应引起疑惑。同时，答案不应有任何内容的遗漏，需构成一个完整的陈述。"
-        }
+        },
+        "evalMethodRequired": "请选择评估方式",
+        "evalNameRequired": "请输入评估名称",
+        "taskType": "任务类型"
       },
       "archive": {
         "success": "归档成功",
@@ -2309,6 +2503,9 @@
         "all": "全部类型",
         "preset": "预置",
         "custom": "自定义"
+      },
+      "actions": {
+        "createTemplate": "创建模板"
       }
     },
     "createTemplate": {
@@ -2428,9 +2625,9 @@
         "delete": "删除任务"
       },
       "confirm": {
-        "deleteTitle": "确认删除该合成任务？",
-        "deleteDescription": "删除后将无法恢复，请谨慎操作。",
-        "okText": "确认删除",
+        "deleteTitle": "确认删除合成任务",
+        "deleteDescription": "删除「{{name}}」后将无法恢复，确定要执行此操作吗？",
+        "okText": "删除",
         "cancelText": "取消"
       },
       "messages": {
@@ -2453,13 +2650,24 @@
       "evaluationCreated": "评估任务创建成功",
       "evaluationCreateFailed": "评估任务创建失败",
       "fetchModelsFailed": "获取模型列表失败"
+    },
+    "common": {
+      "id": "ID"
     }
   },
   "components": {
     "errorBoundary": {
       "title": "发生错误",
       "retry": "重试",
-      "goHome": "返回首页"
+      "goHome": "返回首页",
+      "componentStack": "组件堆栈",
+      "errorMessage": "错误信息"
+    },
+    "deleteConfirm": {
+      "title": "确认删除",
+      "message": "删除后 {{itemName}} 将无法恢复，确定要删除吗？",
+      "confirm": "删除",
+      "cancel": "取消"
     },
     "searchControls": {
       "searchPlaceholder": "搜索...",

@@ -7,6 +7,8 @@ import org.springframework.cloud.gateway.route.RouteLocator;
 import org.springframework.cloud.gateway.route.builder.RouteLocatorBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.FilterType;
+import org.springframework.context.annotation.ComponentScan.Filter;
 
 /**
  * API Gateway & Auth Service Application
@@ -14,7 +16,13 @@ import org.springframework.context.annotation.ComponentScan;
  * 提供路由、鉴权、限流等功能
  */
 @SpringBootApplication
-@ComponentScan(basePackages = {"com.datamate"})
+@ComponentScan(
+    basePackages = {"com.datamate"},
+    excludeFilters = @Filter(
+        type = FilterType.REGEX,
+        pattern = "com\\.datamate\\.common\\.infrastructure\\.config\\..*"
+    )
+)
 @MapperScan(basePackages = {"com.datamate.**.mapper"})
 public class ApiGatewayApplication {
 
@@ -42,7 +50,7 @@ public class ApiGatewayApplication {
                  .uri("http://datamate-backend-python:18000"))
 
             // 知识图谱RAG服务路由
-            .route("python-service", r -> r.path("/api/rag/**", "api/models/**")
+            .route("python-service", r -> r.path("/api/rag/**", "api/models/**", "/api/knowledge-base/**")
                  .uri("http://datamate-backend-python:18000"))
 
             // 数据评估服务路由
@@ -55,6 +63,9 @@ public class ApiGatewayApplication {
             .route("data-cleaning", r -> r.path("/api/cleaning/**")
                 .uri("http://datamate-backend-python:18000"))
 
+            .route("data-setting", r -> r.path("/api/sys-param/**")
+                .uri("http://datamate-backend-python:18000"))
+
             .route("deer-flow-frontend", r -> r.path("/chat/**")
                 .uri("http://deer-flow-frontend:3000"))
 
@@ -65,9 +76,10 @@ public class ApiGatewayApplication {
                 .filters(f -> f.stripPrefix(1).prefixPath("/api"))
                 .uri("http://deer-flow-backend:8000"))
 
-            // 网关服务（用户）
+            // 网关内部服务（用户）
+            // 使用 no-op 触发 GlobalFilter 执行，然后由本地 Controller 处理
             .route("gateway", r -> r.path("/api/user/**")
-                    .uri("http://localhost:8080"))
+                .uri("http://localhost:8080"))
 
             // 其他后端服务
             .route("default", r -> r.path("/api/**")

@@ -20,10 +20,12 @@ import com.datamate.datamanagement.domain.model.dataset.Dataset;
 import com.datamate.datamanagement.domain.model.dataset.DatasetFile;
 import com.datamate.datamanagement.domain.model.dataset.DatasetFileUploadCheckInfo;
 import com.datamate.datamanagement.infrastructure.exception.DataManagementErrorCode;
+import com.datamate.datamanagement.infrastructure.config.DataManagementProperties;
 import com.datamate.datamanagement.infrastructure.persistence.repository.DatasetFileRepository;
 import com.datamate.datamanagement.infrastructure.persistence.repository.DatasetRepository;
 import com.datamate.datamanagement.interfaces.converter.DatasetConverter;
 import com.datamate.datamanagement.interfaces.dto.AddFilesRequest;
+import com.datamate.datamanagement.interfaces.dto.BatchDeleteFilesRequest;
 import com.datamate.datamanagement.interfaces.dto.CreateDirectoryRequest;
 import com.datamate.datamanagement.interfaces.dto.UploadFileRequest;
 import com.datamate.datamanagement.interfaces.dto.UploadFilesPreRequest;
@@ -35,6 +37,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
 import org.apache.commons.compress.archivers.zip.ZipArchiveOutputStream;
+import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -52,6 +55,7 @@ import java.net.MalformedURLException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -79,12 +83,16 @@ public class DatasetFileApplicationService {
     @Value("${datamate.data-management.file.duplicate:COVER}")
     private DuplicateMethod duplicateMethod;
 
+    private final DataManagementProperties dataManagementProperties;
+
     @Autowired
     public DatasetFileApplicationService(DatasetFileRepository datasetFileRepository,
-                                         DatasetRepository datasetRepository, FileService fileService) {
+                                         DatasetRepository datasetRepository, FileService fileService,
+                                         DataManagementProperties dataManagementProperties) {
         this.datasetFileRepository = datasetFileRepository;
         this.datasetRepository = datasetRepository;
         this.fileService = fileService;
+        this.dataManagementProperties = dataManagementProperties;
     }
 
     /**
@@ -109,9 +117,41 @@ public class DatasetFileApplicationService {
             return PagedResponse.of(new Page<>(page, size));
         }
         String datasetPath = dataset.getPath();
-        Path queryPath = Path.of(dataset.getPath() + File.separator + prefix);
+
+        // 规范化 prefix：去掉首尾斜杠，处理空字符串
+        prefix = Optional.ofNullable(prefix).orElse("").trim();
+        prefix = prefix.replace("\\", "/");
+        while (prefix.startsWith("/")) {
+            prefix = prefix.substring(1);
+        }
+        while (prefix.endsWith("/")) {
+            prefix = prefix.substring(0, prefix.length() - 1);
+        }
+
+        // 使用 Path API 安全地构建路径
+        Path basePath = Paths.get(datasetPath);
+        Path queryPath = prefix.isEmpty() ? basePath : basePath.resolve(prefix).normalize();
+
+        // 确保查询路径在数据集路径下（防止路径遍历）
+        if (!queryPath.startsWith(basePath)) {
+            log.warn("Invalid prefix path: datasetId={}, prefix={}, queryPath={}", datasetId, prefix, queryPath);
+            return PagedResponse.of(new Page<>(page, size));
+        }
+
         Map<String, DatasetFile> datasetFilesMap = datasetFileRepository.findAllByDatasetId(datasetId)
             .stream().collect(Collectors.toMap(DatasetFile::getFilePath, Function.identity()));
+
+        // 检查路径是否存在
+        if (!Files.exists(queryPath)) {
+            log.warn("Dataset path does not exist: datasetId={}, path={}, queryPath={}", datasetId, datasetPath, queryPath);
+            return PagedResponse.of(new Page<>(page, size));
+        }
+
+        if (!Files.isDirectory(queryPath)) {
+            log.warn("Dataset path is not a directory: datasetId={}, queryPath={}", datasetId, queryPath);
+            return PagedResponse.of(new Page<>(page, size));
+        }
+
         try (Stream<Path> pathStream = Files.list(queryPath)) {
             List<Path> allFiles = pathStream
                 .filter(path -> path.toString().startsWith(datasetPath))
@@ -137,7 +177,7 @@ public class DatasetFileApplicationService {
 
             return PagedResponse.of(page, size, total, totalPages, datasetFiles);
         } catch (IOException e) {
-            log.warn("list dataset path error");
+            log.error("Failed to list dataset files: datasetId={}, queryPath={}", datasetId, queryPath, e);
             return PagedResponse.of(new Page<>(page, size));
         }
     }
@@ -225,25 +265,104 @@ public class DatasetFileApplicationService {
 
     /**
      * 删除文件
+     * 使用悲观锁防止并发删除导致 fileCount 计算不准确
      */
     @Transactional
     public void deleteDatasetFile(String datasetId, String fileId, String prefix) {
-        Dataset dataset = datasetRepository.getById(datasetId);
+        // 使用悲观锁获取 dataset，确保并发安全
+        Dataset dataset = datasetRepository.getByIdWithLock(datasetId);
         DatasetFile file = getDatasetFile(dataset, fileId, prefix);
-        dataset.setFiles(new ArrayList<>(Collections.singleton(file)));
+
+        // 先删除数据库记录
         datasetFileRepository.removeById(fileId);
-        if (CommonUtils.isUUID(fileId)) {
-            dataset.removeFile(file);
-        }
-        datasetRepository.updateById(dataset);
-        // 删除文件时，上传到数据集中的文件会同时删除数据库中的记录和文件系统中的文件，归集过来的文件仅删除数据库中的记录
+
+        // 删除物理文件（仅删除在数据集路径下的文件）
         if (file.getFilePath().startsWith(dataset.getPath())) {
             try {
-                Path filePath = Paths.get(file.getFilePath());
+                Path filePath = validateAndResolvePath(file.getFilePath(), dataset.getPath());
                 Files.deleteIfExists(filePath);
             } catch (IOException ex) {
+                log.error("删除物理文件失败: {}", file.getFilePath(), ex);
                 throw BusinessException.of(SystemErrorCode.FILE_SYSTEM_ERROR);
             }
+        }
+
+        // 重新计算文件统计信息（确保数据准确）
+        List<DatasetFile> remainingFiles = datasetFileRepository.findAllByDatasetId(datasetId);
+        dataset.setFileCount((long) remainingFiles.size());
+        dataset.setSizeBytes(remainingFiles.stream()
+            .mapToLong(f -> f.getFileSize() != null ? f.getFileSize().longValue() : 0L)
+            .sum());
+        dataset.setUpdatedAt(LocalDateTime.now());
+
+        datasetRepository.updateById(dataset);
+
+        log.info("删除文件成功 - datasetId: {}, fileId: {}, fileName: {}, fileCount: {}, sizeBytes: {}",
+            datasetId, fileId, file.getFileName(), dataset.getFileCount(), dataset.getSizeBytes());
+    }
+
+    /**
+     * 批量删除文件
+     * 使用悲观锁防止并发删除导致 fileCount 计算不准确
+     */
+    @Transactional
+    public void batchDeleteFiles(String datasetId, BatchDeleteFilesRequest request) {
+        // 使用悲观锁获取 dataset，确保并发安全
+        Dataset dataset = datasetRepository.getByIdWithLock(datasetId);
+        if (dataset == null) {
+            throw BusinessException.of(DataManagementErrorCode.DATASET_NOT_FOUND);
+        }
+
+        List<String> fileIds = request.getFileIds();
+        if (fileIds == null || fileIds.isEmpty()) {
+            throw BusinessException.of(CommonErrorCode.PARAM_ERROR);
+        }
+
+        List<DatasetFile> filesToDelete = new ArrayList<>();
+        List<String> failedFileIds = new ArrayList<>();
+
+        // 先删除数据库记录
+        for (String fileId : fileIds) {
+            try {
+                DatasetFile file = getDatasetFile(dataset, fileId, request.getPrefix());
+                filesToDelete.add(file);
+                datasetFileRepository.removeById(fileId);
+            } catch (Exception e) {
+                log.error("Failed to delete file with id: {}", fileId, e);
+                failedFileIds.add(fileId);
+            }
+        }
+
+        // 删除物理文件（仅删除在数据集路径下的文件）
+        for (DatasetFile file : filesToDelete) {
+            if (file.getFilePath().startsWith(dataset.getPath())) {
+                try {
+                    Path filePath = validateAndResolvePath(file.getFilePath(), dataset.getPath());
+                    Files.deleteIfExists(filePath);
+                } catch (IllegalArgumentException ex) {
+                    log.warn("Invalid file path detected, skipping deletion: {}", file.getFilePath());
+                } catch (IOException ex) {
+                    log.error("Failed to delete file from filesystem: {}", file.getFilePath(), ex);
+                }
+            }
+        }
+
+        // 重新计算文件统计信息（确保数据准确）
+        List<DatasetFile> remainingFiles = datasetFileRepository.findAllByDatasetId(datasetId);
+        dataset.setFileCount((long) remainingFiles.size());
+        dataset.setSizeBytes(remainingFiles.stream()
+            .mapToLong(f -> f.getFileSize() != null ? f.getFileSize().longValue() : 0L)
+            .sum());
+        dataset.setUpdatedAt(LocalDateTime.now());
+
+        datasetRepository.updateById(dataset);
+
+        log.info("批量删除文件成功 - datasetId: {}, successCount: {}, failedCount: {}, fileCount: {}, sizeBytes: {}",
+            datasetId, filesToDelete.size(), failedFileIds.size(), dataset.getFileCount(), dataset.getSizeBytes());
+
+        // 如果有失败的文件，记录日志但不抛出异常
+        if (!failedFileIds.isEmpty()) {
+            log.warn("Failed to delete {} files out of {}", failedFileIds.size(), fileIds.size());
         }
     }
 
@@ -253,7 +372,14 @@ public class DatasetFileApplicationService {
     @Transactional(readOnly = true)
     public Resource downloadFile(DatasetFile file) {
         try {
-            Path filePath = Paths.get(file.getFilePath()).normalize();
+            // 获取对应的数据集以验证路径安全性
+            Dataset dataset = datasetRepository.getById(file.getDatasetId());
+            if (dataset == null) {
+                throw new RuntimeException("Dataset not found for file: " + file.getFileName());
+            }
+
+            // 验证路径安全性，防止路径遍历攻击
+            Path filePath = validateAndResolvePath(file.getFilePath(), dataset.getPath());
             log.info("start download file {}", file.getFilePath());
             Resource resource = new UrlResource(filePath.toUri());
             if (resource.exists()) {
@@ -277,18 +403,18 @@ public class DatasetFileApplicationService {
         }
         String datasetPath = dataset.getPath();
         Path downloadPath = Paths.get(datasetPath).normalize();
-        
+
         // 检查路径是否存在
         if (!Files.exists(downloadPath) || !Files.isDirectory(downloadPath)) {
             throw BusinessException.of(DataManagementErrorCode.DATASET_NOT_FOUND);
         }
-        
+
         response.setContentType("application/zip");
         String zipName = String.format("dataset_%s_%s.zip",
                 dataset.getName() != null ? dataset.getName().replaceAll("[^a-zA-Z0-9_-]", "_") : "dataset",
                 LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss")));
         response.setHeader(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + zipName + "\"");
-        
+
         try (ZipArchiveOutputStream zos = new ZipArchiveOutputStream(response.getOutputStream())) {
             try (Stream<Path> pathStream = Files.walk(downloadPath)) {
                 pathStream
@@ -355,19 +481,35 @@ public class DatasetFileApplicationService {
         if (Objects.isNull(datasetRepository.getById(datasetId))) {
             throw BusinessException.of(DataManagementErrorCode.DATASET_NOT_FOUND);
         }
-        
+
         // 构建上传路径，如果有 prefix 则追加到路径中
         String prefix = Optional.ofNullable(chunkUploadRequest.getPrefix()).orElse("").trim();
         prefix = prefix.replace("\\", "/");
         while (prefix.startsWith("/")) {
             prefix = prefix.substring(1);
         }
-        
-        String uploadPath = datasetBasePath + File.separator + datasetId;
-        if (!prefix.isEmpty()) {
-            uploadPath = uploadPath + File.separator + prefix.replace("/", File.separator);
+
+        String uploadPath;
+        // 如果需要解压，上传到全局临时目录以避免覆盖数据集中的同名文件
+        if (chunkUploadRequest.isHasArchive()) {
+            uploadPath = datasetBasePath + File.separator + ".temp_upload_" + System.currentTimeMillis();
+        } else {
+            uploadPath = datasetBasePath + File.separator + datasetId;
+            if (!prefix.isEmpty()) {
+                uploadPath = uploadPath + File.separator + prefix.replace("/", File.separator);
+            }
+
+            // 防止路径穿越：规范化后校验 uploadPath 仍在 datasetBasePath 下
+            Path normalizedUploadPath = Paths.get(uploadPath).normalize().toAbsolutePath();
+            Path normalizedBase = Paths.get(datasetBasePath).normalize().toAbsolutePath();
+            if (!normalizedUploadPath.startsWith(normalizedBase)) {
+                log.warn("Path traversal attempt in preUpload: datasetId={}, prefix={}, uploadPath={}",
+                    datasetId, prefix, normalizedUploadPath);
+                throw BusinessException.of(CommonErrorCode.PARAM_ERROR,
+                    "Upload path outside allowed directory");
+            }
         }
-        
+
         ChunkUploadPreRequest request = ChunkUploadPreRequest.builder().build();
         request.setUploadPath(uploadPath);
         request.setTotalFileNum(chunkUploadRequest.getTotalFileNum());
@@ -425,8 +567,81 @@ public class DatasetFileApplicationService {
     private void addFileToDataset(String datasetId, List<FileUploadResult> unpacked) {
         Dataset dataset = datasetRepository.getById(datasetId);
         dataset.setFiles(datasetFileRepository.findAllByDatasetId(datasetId));
+
+        // 收集所有临时目录，在文件处理完后统一删除
+        Set<String> tempDirsToDelete = new HashSet<>();
+
         for (FileUploadResult file : unpacked) {
             File savedFile = file.getSavedFile();
+            String filePath = savedFile.getPath();
+
+            // 如果文件在临时目录（从解压的上传来），移动到数据集目录
+            if (filePath.contains(".temp_upload_")) {
+                try {
+                    // 提取临时目录之后的部分（保持相对路径结构）
+                    int tempIndex = filePath.indexOf(".temp_upload_");
+
+                    // 找到 .temp_upload_{timestamp}/ 之后的内容
+                    // 临时目录格式: /dataset/.temp_upload_{timestamp}/
+                    int afterTimestamp = filePath.indexOf(File.separator, tempIndex + ".temp_upload_".length());
+                    if (afterTimestamp == -1) {
+                        // 没有分隔符，说明文件就在临时目录根下
+                        afterTimestamp = filePath.length();
+                    }
+
+                    String tempDir = filePath.substring(0, afterTimestamp);
+                    String relativePath = filePath.substring(afterTimestamp);
+
+                    // 去掉相对路径开头的分隔符
+                    if (relativePath.startsWith(File.separator)) {
+                        relativePath = relativePath.substring(1);
+                    }
+
+                    // 构建安全的目标路径：防止目录遍历攻击
+                    // 校验 datasetId，防止目录遍历或非法路径片段
+                    if (datasetId.contains("..") || datasetId.contains("/") || datasetId.contains("\\")) {
+                        throw BusinessException.of(CommonErrorCode.PARAM_ERROR, "Invalid datasetId: " + datasetId);
+                    }
+
+                    // 校验相对路径，防止目录遍历
+                    if (relativePath.contains("..")) {
+                        throw BusinessException.of(CommonErrorCode.PARAM_ERROR, "Invalid relative path: " + relativePath);
+                    }
+
+                    // 使用 Path API 安全地构建路径
+                    Path datasetBaseDirPath = Paths.get(datasetBasePath).resolve(datasetId).normalize();
+                    Path targetPath;
+                    if (!relativePath.isEmpty()) {
+                        targetPath = datasetBaseDirPath.resolve(relativePath).normalize();
+                    } else {
+                        targetPath = datasetBaseDirPath;
+                    }
+
+                    // 确保目标路径仍然位于数据集根目录之下
+                    if (!targetPath.startsWith(datasetBaseDirPath)) {
+                        throw BusinessException.of(CommonErrorCode.PARAM_ERROR,
+                            "Path traversal detected: " + relativePath);
+                    }
+
+                    File targetFile = targetPath.toFile();
+                    // 创建父目录
+                    FileUtils.createParentDirectories(targetFile);
+
+                    // 移动文件（覆盖已存在的文件）
+                    Files.move(savedFile.toPath(), targetFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                    log.info("Moved file from temp dir: {} -> {}", savedFile.getPath(), targetPath);
+
+                    // 收集临时目录，稍后删除
+                    tempDirsToDelete.add(tempDir);
+
+                    // 更新文件引用
+                    savedFile = targetFile;
+                } catch (IOException e) {
+                    log.error("Failed to move file from temp directory: {}", filePath, e);
+                    continue; // 跳过此文件
+                }
+            }
+
             LocalDateTime currentTime = LocalDateTime.now();
             // 统一 fileName：无论是否通过文件夹/压缩包上传，都只保留纯文件名
             String originalFileName = file.getFileName();
@@ -452,6 +667,20 @@ public class DatasetFileApplicationService {
             datasetFileRepository.saveOrUpdate(datasetFile);
             dataset.addFile(datasetFile);
         }
+
+        // 递归删除所有临时目录
+        for (String tempDir : tempDirsToDelete) {
+            try {
+                File tempDirFile = new File(tempDir);
+                if (tempDirFile.exists() && tempDirFile.isDirectory()) {
+                    org.apache.commons.io.FileUtils.deleteDirectory(tempDirFile);
+                    log.info("Deleted temp directory: {}", tempDir);
+                }
+            } catch (IOException e) {
+                log.warn("Failed to delete temp directory: {}", tempDir, e);
+            }
+        }
+
         dataset.active();
         datasetRepository.updateById(dataset);
     }
@@ -536,7 +765,7 @@ public class DatasetFileApplicationService {
         try {
             response.setContentType("application/zip");
             response.setHeader(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + zipFileName + "\"");
-            
+
             try (ZipArchiveOutputStream zipOut = new ZipArchiveOutputStream(response.getOutputStream())) {
                 zipDirectory(normalized, normalized, zipOut);
                 zipOut.finish();
@@ -574,7 +803,8 @@ public class DatasetFileApplicationService {
      */
     @Transactional
     public void deleteDirectory(String datasetId, String prefix) {
-        Dataset dataset = datasetRepository.getById(datasetId);
+        // 使用悲观锁获取 dataset，防止并发删除导致 fileCount 不准确
+        Dataset dataset = datasetRepository.getByIdWithLock(datasetId);
         if (dataset == null) {
             throw BusinessException.of(DataManagementErrorCode.DATASET_NOT_FOUND);
         }
@@ -625,6 +855,10 @@ public class DatasetFileApplicationService {
             })
             .collect(Collectors.toList());
 
+        log.info("删除目录开始 - datasetId: {}, prefix: {}, fileCount: {}, filesToDelete: {}",
+            datasetId, prefix, dataset.getFileCount(), filesToDelete.size());
+
+        // 删除数据库记录
         for (DatasetFile file : filesToDelete) {
             datasetFileRepository.removeById(file.getId());
         }
@@ -633,16 +867,22 @@ public class DatasetFileApplicationService {
         try {
             deleteDirectoryRecursively(normalized);
         } catch (IOException e) {
-            log.error("Failed to delete directory {} for dataset {}", normalized, datasetId, e);
+            log.error("删除目录失败: datasetId={}, prefix={}", datasetId, prefix, e);
             throw BusinessException.of(SystemErrorCode.FILE_SYSTEM_ERROR);
         }
 
-        // 更新数据集
-        dataset.setFiles(filesToDelete);
-        for (DatasetFile file : filesToDelete) {
-            dataset.removeFile(file);
-        }
+        // 重新计算文件统计信息（确保数据准确）
+        List<DatasetFile> remainingFiles = datasetFileRepository.findAllByDatasetId(datasetId);
+        dataset.setFileCount((long) remainingFiles.size());
+        dataset.setSizeBytes(remainingFiles.stream()
+            .mapToLong(f -> f.getFileSize() != null ? f.getFileSize().longValue() : 0L)
+            .sum());
+        dataset.setUpdatedAt(LocalDateTime.now());
+
         datasetRepository.updateById(dataset);
+
+        log.info("删除目录成功 - datasetId: {}, prefix: {}, deletedCount: {}, fileCount: {}, sizeBytes: {}",
+            datasetId, prefix, filesToDelete.size(), dataset.getFileCount(), dataset.getSizeBytes());
     }
 
     /**
@@ -832,9 +1072,6 @@ public class DatasetFileApplicationService {
      */
     @Transactional
     public List<DatasetFile> addFilesToDataset(String datasetId, AddFilesRequest req) {
-        if (!req.isValidPrefix()) {
-            throw BusinessException.of(DataManagementErrorCode.DIRECTORY_NOT_FOUND);
-        }
         Dataset dataset = datasetRepository.getById(datasetId);
         BusinessAssert.notNull(dataset, SystemErrorCode.RESOURCE_NOT_FOUND);
         List<DatasetFile> addedFiles = new ArrayList<>();
@@ -867,13 +1104,36 @@ public class DatasetFileApplicationService {
         if (StringUtils.isBlank(sourPath) || StringUtils.isBlank(targetPath)) {
             return;
         }
-        Path source = Paths.get(sourPath).normalize();
-        Path target = Paths.get(targetPath).normalize();
+
+        // 规范化并验证源文件路径
+        Path source;
+        try {
+            source = Paths.get(sourPath).normalize();
+        } catch (Exception e) {
+            log.warn("Invalid source file path: {}", sourPath);
+            throw BusinessException.of(SystemErrorCode.FILE_SYSTEM_ERROR);
+        }
+
+        // 规范化并验证目标文件路径
+        Path target;
+        try {
+            target = Paths.get(targetPath).normalize();
+        } catch (Exception e) {
+            log.warn("Invalid target file path: {}", targetPath);
+            throw BusinessException.of(SystemErrorCode.FILE_SYSTEM_ERROR);
+        }
 
         // 检查源文件是否存在且为普通文件
         if (!Files.exists(source) || !Files.isRegularFile(source)) {
             log.warn("Source file does not exist or is not a regular file: {}", sourPath);
             throw BusinessException.of(SystemErrorCode.FILE_SYSTEM_ERROR);
+        }
+
+        // 检查源路径是否在允许的目录范围内，防止任意文件读取
+        if (!isSourcePathAllowed(source)) {
+            log.warn("Source file path is outside allowed directories: {}", sourPath);
+            throw BusinessException.of(CommonErrorCode.PARAM_ERROR,
+                    "Source file path is outside allowed directories: " + sourPath);
         }
 
         try {
@@ -920,10 +1180,62 @@ public class DatasetFileApplicationService {
                 .fileName(fileName)
                 .fileType(AnalyzerUtils.getExtension(fileName))
                 .fileSize(sourceFile.length())
-                .filePath(Paths.get(dataset.getPath(), req.getPrefix(), fileName).toString())
+                .filePath(Paths.get(dataset.getPath(), req.getEffectivePrefix(file), fileName).toString())
                 .uploadTime(currentTime)
                 .lastAccessTime(currentTime)
                 .metadata(objectMapper.writeValueAsString(file.getMetadata()))
                 .build();
+    }
+
+    /**
+     * 检查源文件路径是否在允许的目录范围内
+     *
+     * @param sourcePath 规范化后的源文件路径
+     * @return true 如果路径在任一允许目录内
+     */
+    private boolean isSourcePathAllowed(Path sourcePath) {
+        List<String> allowedDirs = dataManagementProperties.getFileStorage().getAllowedSourceDirs();
+        if (allowedDirs == null || allowedDirs.isEmpty()) {
+            log.warn("No allowed source directories configured, denying source path: {}", sourcePath);
+            return false;
+        }
+
+        Path normalizedSource = sourcePath.normalize().toAbsolutePath();
+        for (String allowedDir : allowedDirs) {
+            if (StringUtils.isBlank(allowedDir)) {
+                continue;
+            }
+            Path normalizedAllowed = Paths.get(allowedDir).normalize().toAbsolutePath();
+            if (normalizedSource.startsWith(normalizedAllowed)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 安全地验证并获取文件路径，防止路径遍历攻击
+     *
+     * @param filePath 用户提供的文件路径
+     * @param basePath 允许的基础路径（数据集路径）
+     * @return 规范化后的绝对路径
+     * @throws IllegalArgumentException 如果路径不在基础路径内
+     */
+    private Path validateAndResolvePath(String filePath, String basePath) {
+        if (StringUtils.isEmpty(filePath)) {
+            throw new IllegalArgumentException("File path cannot be empty");
+        }
+
+        Path normalizedPath = Paths.get(filePath).normalize();
+        Path normalizedBasePath = Paths.get(basePath).normalize();
+
+        // 验证规范化后的路径是否在基础路径内
+        if (!normalizedPath.startsWith(normalizedBasePath)) {
+            throw new IllegalArgumentException(
+                "File path is outside the allowed directory: " + filePath
+            );
+        }
+
+        return normalizedPath;
     }
 }

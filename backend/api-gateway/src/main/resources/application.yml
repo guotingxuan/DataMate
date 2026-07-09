@@ -1,6 +1,7 @@
 spring:
   main:
     allow-circular-references: true
+    allow-bean-definition-overriding: true
   application:
     name: datamate-gateway  # 必须设置应用名
 
@@ -21,7 +22,7 @@ spring:
     driver-class-name: org.postgresql.Driver
     url: jdbc:postgresql://datamate-database:5432/datamate?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
     username: ${DB_USERNAME:postgres}
-    password: ${DB_PASSWORD:password}
+    password: ${DB_PASSWORD}
     hikari:
       maximum-pool-size: 20
       minimum-idle: 5
@@ -33,6 +34,14 @@ datamate:
   jwt:
     secret: ${JWT_SECRET}
     expiration-seconds: 3600
+oms:
+  auth:
+    enabled: ${OMS_AUTH_ENABLED:false}
+  service:
+    url: ${OMS_SERVICE_URL:https://omsservice:18082}
   # 服务器端口配置
 server:
   port: 8080  # 必须有这个配置
+
+logging:
+  config: classpath:log4j2.xml

@@ -1,112 +1,119 @@
-import { App, Button, Descriptions, DescriptionsProps, Modal, Table, Input, Spin } from "antd";
+import { App, Button, Modal, Table, Input, Spin } from "antd";
 import { formatBytes, formatDateTime } from "@/utils/unit";
 import { Download, Trash2, Folder, File } from "lucide-react";
 import { getDatasetTypeMap } from "../../dataset.const";
+import DeleteConfirmModal from "@/components/DeleteConfirmModal";
+import FilePreview from "@/components/file-preview";
 import { useTranslation } from "react-i18next";
+import { useState } from "react";
 
 export default function Overview({ dataset, filesOperation, fetchDataset }) {
   const { modal, message } = App.useApp();
   const { t } = useTranslation();
   const datasetTypeMap = getDatasetTypeMap(t);
+
+  // 删除确认弹窗状态
+  const [deleteModal, setDeleteModal] = useState<{
+    visible: boolean;
+    type: "file" | "directory" | "batch";
+    fileName: string;
+    count?: number;
+    handler: () => void | Promise<void>;
+  }>({
+    visible: false,
+    type: "file",
+    fileName: "",
+    handler: () => {},
+  });
+
+  // 批量删除确认弹窗状态
+  const [batchDeleteModal, setBatchDeleteModal] = useState<{
+    visible: boolean;
+    count: number;
+  }>({
+    visible: false,
+    count: 0,
+  });
+
   const {
     fileList,
     pagination,
     selectedFiles,
     setSelectedFiles,
+    clearSelection,
     previewVisible,
     previewFileName,
     previewContent,
     previewUrl,
+    previewBlob,
     previewFileDetail,
     previewLoading,
+    handlePreviewFile,
     setPreviewVisible,
     handleDeleteFile,
     handleDownloadFile,
     handleBatchDeleteFiles,
     handleBatchExport,
+    handleSelectionChange,
     handleCreateDirectory,
     handleDownloadDirectory,
     handleDeleteDirectory,
     handleRenameFile,
     handleRenameDirectory,
-    handlePreviewFile,
   } = filesOperation;
 
-  // 文件列表多选配置
+  // 文件列表多选配置（支持跨页选择）
   const rowSelection = {
-    onChange: (selectedRowKeys: React.Key[], selectedRows: any[]) => {
-      setSelectedFiles(selectedRowKeys as number[]);
-      console.log(
-        `selectedRowKeys: ${selectedRowKeys}`,
-        "selectedRows: ",
-        selectedRows
-      );
-    },
+    selectedRowKeys: selectedFiles,
+    onChange: handleSelectionChange,
+    preserveSelectedRowKeys: true, // 关键：跨页时保持选中状态
+    getCheckboxProps: (record: any) => ({
+      // 目录和文件都可以选择
+      name: record.fileName,
+    }),
   };
-  // 基本信息
-  const items: DescriptionsProps["items"] = [
-    {
-      key: "id",
-      label: t("dataManagement.labels.id"),
-      children: dataset.id,
-    },
-    {
-      key: "name",
-      label: t("dataManagement.labels.name"),
-      children: dataset.name,
-    },
-    {
-      key: "fileCount",
-      label: t("dataManagement.labels.fileCount"),
-      children: dataset.fileCount || 0,
-    },
-    {
-      key: "size",
-      label: t("dataManagement.labels.dataSize"),
-      children: dataset.size || "0 B",
-    },
 
-    {
-      key: "datasetType",
-      label: t("dataManagement.labels.type"),
-      children: datasetTypeMap[dataset?.datasetType]?.label || t("dataManagement.defaults.unknown"),
-    },
-    {
-      key: "status",
-      label: t("dataManagement.labels.status"),
-      children: dataset?.status?.label || t("dataManagement.defaults.unknown"),
-    },
-    {
-      key: "createdBy",
-      label: t("dataManagement.labels.creator"),
-      children: dataset.createdBy || t("dataManagement.defaults.unknown"),
-    },
-    {
-      key: "targetLocation",
-      label: t("dataManagement.labels.storagePath"),
-      children: dataset.targetLocation || t("dataManagement.defaults.unknown"),
-    },
-    {
-      key: "pvcName",
-      label: t("dataManagement.labels.storageName"),
-      children: dataset.pvcName || t("dataManagement.defaults.unknown"),
-    },
-    {
-      key: "createdAt",
-      label: t("dataManagement.labels.createdAt"),
-      children: dataset.createdAt,
-    },
-    {
-      key: "updatedAt",
-      label: t("dataManagement.labels.updatedAt"),
-      children: dataset.updatedAt,
-    },
-    {
-      key: "description",
-      label: t("dataManagement.labels.description"),
-      children: dataset.description || t("dataManagement.defaults.none"),
-    },
-  ];
+  // 显示删除确认弹窗
+  const showDeleteConfirm = (
+    type: "file" | "directory",
+    fileName: string,
+    handler: () => void | Promise<void>
+  ) => {
+    setDeleteModal({
+      visible: true,
+      type,
+      fileName,
+      handler,
+    });
+  };
+
+  // 执行删除操作
+  const handleConfirmDelete = async () => {
+    await deleteModal.handler();
+    setDeleteModal({ visible: false, type: "file", fileName: "", handler: () => {} });
+  };
+
+  const handleCancelDelete = () => {
+    setDeleteModal({ visible: false, type: "file", fileName: "", handler: () => {} });
+  };
+
+  // 显示批量删除确认弹窗
+  const showBatchDeleteConfirm = () => {
+    if (selectedFiles.length === 0) {
+      message.warning({ content: "请先选择要删除的文件" });
+      return;
+    }
+    setBatchDeleteModal({
+      visible: true,
+      count: selectedFiles.length,
+    });
+  };
+
+  // 执行批量删除
+  const handleConfirmBatchDelete = async () => {
+    setBatchDeleteModal({ visible: false, count: 0 });
+    await handleBatchDeleteFiles();
+  };
 
   // 文件列表列定义
   const columns = [
@@ -143,8 +150,19 @@ export default function Overview({ dataset, filesOperation, fetchDataset }) {
                 const newPath = `${currentPath}${record.fileName}/`;
                 filesOperation.fetchFiles(newPath, 1, filesOperation.pagination.pageSize);
               }}
+              className="hover:text-blue-600 transition-colors duration-200"
+              style={{
+                padding: 0,
+                height: 'auto',
+                fontWeight: 500
+              }}
             >
-              {content}
+              <div className="flex items-center group">
+                <Folder className="mr-2 text-blue-500 group-hover:text-blue-600 transition-colors" size={iconSize} />
+                <span className="truncate underline-transparent group-hover:underline group-hover:text-blue-600 transition-all">
+                  {displayName}
+                </span>
+              </div>
             </Button>
           );
         }
@@ -153,8 +171,19 @@ export default function Overview({ dataset, filesOperation, fetchDataset }) {
             <Button
               type="link"
               onClick={() => handlePreviewFile(record)}
+              className="hover:text-blue-600 transition-colors duration-200"
+              style={{
+                padding: 0,
+                height: 'auto',
+                fontWeight: 500
+              }}
             >
-              {content}
+              <div className="flex items-center group">
+                <File className="mr-2 text-black group-hover:text-blue-600 transition-colors" size={iconSize} />
+                <span className="truncate underline-transparent group-hover:underline group-hover:text-blue-600 transition-all">
+                  {displayName}
+                </span>
+              </div>
             </Button>
           );
       },
@@ -294,8 +323,13 @@ export default function Overview({ dataset, filesOperation, fetchDataset }) {
                         message.warning(t("dataManagement.placeholders.folderName"));
                         return Promise.reject();
                       }
-                      await handleRenameDirectory(fullPath, record.fileName, newDirName);
-                      fetchDataset();
+                      try {
+                        await handleRenameDirectory(fullPath, record.fileName, newDirName);
+                        fetchDataset();
+                      } catch (error) {
+                        // 错误已经在 handleRenameDirectory 中处理，这里只需要阻止 modal 关闭
+                        return Promise.reject();
+                      }
                     },
                   });
                 }}
@@ -305,19 +339,16 @@ export default function Overview({ dataset, filesOperation, fetchDataset }) {
               <Button
                 size="small"
                 type="link"
-                onClick={() => {
-                  modal.confirm({
-                    title: t("dataManagement.confirm.deleteFolderTitle"),
-                    content: t("dataManagement.confirm.deleteFolderDesc", { name: record.fileName }),
-                    okText: t("dataManagement.confirm.deleteConfirm"),
-                    okType: "danger",
-                    cancelText: t("dataManagement.confirm.deleteCancel"),
-                    onOk: async () => {
+                onClick={() =>
+                  showDeleteConfirm(
+                    "directory",
+                    record.fileName,
+                    async () => {
                       await handleDeleteDirectory(fullPath, record.fileName);
                       fetchDataset();
-                    },
-                  });
-                }}
+                    }
+                  )
+                }
               >
                 {t("dataManagement.actions.delete")}
               </Button>
@@ -365,8 +396,13 @@ export default function Overview({ dataset, filesOperation, fetchDataset }) {
                     message.warning(t("dataManagement.placeholders.fileName"));
                     return Promise.reject();
                   }
-                  await handleRenameFile(record, newBaseName);
-                  fetchDataset();
+                  try {
+                    await handleRenameFile(record, newBaseName);
+                    fetchDataset();
+                  } catch (error) {
+                    // 错误已经在 handleRenameFile 中处理，这里只需要阻止 modal 关闭
+                    return Promise.reject();
+                  }
                 },
               });
             }}
@@ -376,11 +412,16 @@ export default function Overview({ dataset, filesOperation, fetchDataset }) {
           <Button
             size="small"
             type="link"
-            onClick={async () => {
-              await handleDeleteFile(record);
-              fetchDataset()
+            onClick={() =>
+              showDeleteConfirm(
+                "file",
+                record.fileName,
+                async () => {
+                  await handleDeleteFile(record);
+                  fetchDataset();
+                }
+              )
             }
-          }
           >
             {t("dataManagement.actions.delete")}
           </Button>
@@ -392,15 +433,6 @@ export default function Overview({ dataset, filesOperation, fetchDataset }) {
   return (
     <>
       <div className=" flex flex-col gap-4">
-        {/* 基本信息 */}
-        <Descriptions
-          title={t("dataManagement.detail.sectionBasicInfo")}
-          layout="vertical"
-          size="small"
-          items={items}
-          column={5}
-        />
-
         {/* 文件列表 */}
         <div className="flex items-center justify-between mt-8 mb-2">
           <h2 className="text-base font-semibold">
@@ -440,18 +472,36 @@ export default function Overview({ dataset, filesOperation, fetchDataset }) {
         {selectedFiles.length > 0 && (
           <div className="flex items-center gap-2 p-3 bg-blue-50 rounded-lg border border-blue-200">
             <span className="text-sm text-blue-700 font-medium">
-              {t("dataManagement.detail.selectedFiles", { count: selectedFiles.length })}
+              已选择 {selectedFiles.length} 项
+              {(() => {
+                const dirCount = selectedFiles.filter(id => typeof id === 'string' && id.startsWith('directory-')).length;
+                const fileCount = selectedFiles.length - dirCount;
+                if (dirCount > 0 && fileCount > 0) {
+                  return ` (${fileCount} 个文件, ${dirCount} 个文件夹)`;
+                } else if (dirCount > 0) {
+                  return ` (${dirCount} 个文件夹)`;
+                } else if (fileCount > 0) {
+                  return ` (${fileCount} 个文件)`;
+                }
+                return '';
+              })()}
             </span>
             <Button
+              onClick={clearSelection}
+              className="ml-auto"
+            >
+              取消选择
+            </Button>
+            <Button
               onClick={handleBatchExport}
-              className="ml-auto bg-transparent"
+              className="bg-white"
             >
               <Download className="w-4 h-4 mr-2" />
               {t("dataManagement.actions.batchExport")}
             </Button>
             <Button
-              onClick={handleBatchDeleteFiles}
-              className="text-red-600 hover:text-red-700 hover:bg-red-50 bg-transparent"
+              onClick={showBatchDeleteConfirm}
+              danger
             >
               <Trash2 className="w-4 h-4 mr-2" />
               {t("dataManagement.actions.batchDelete")}
@@ -509,11 +559,15 @@ export default function Overview({ dataset, filesOperation, fetchDataset }) {
             rowKey="id"
             columns={columns}
             dataSource={fileList}
-            // rowSelection={rowSelection}
-            scroll={{ x: "max-content", y: 600 }}
+            rowSelection={rowSelection}
+            scroll={{ x: "max-content" }}
             pagination={{
-              ...pagination,
+              current: pagination.current,
+              pageSize: pagination.pageSize,
+              total: pagination.total,
               showTotal: (total) => t("dataManagement.detail.totalItems", { total }),
+              showSizeChanger: true,
+              pageSizeOptions: [10, 20, 50, 100],
               onChange: (page, pageSize) => {
                 filesOperation.fetchFiles(filesOperation.pagination.prefix, page, pageSize);
               }
@@ -527,40 +581,19 @@ export default function Overview({ dataset, filesOperation, fetchDataset }) {
         open={previewVisible}
         onCancel={() => setPreviewVisible(false)}
         footer={null}
-        width={1000}
+        width={1200}
+        styles={{ body: { padding: 0 } }}
       >
-        <div className="flex gap-4" style={{ minHeight: 400 }}>
+        <div className="flex gap-4" style={{ minHeight: 600, height: 600 }}>
           {/* 左侧预览区域 */}
-          <div className="flex-1 border border-gray-200 rounded-md p-3 flex items-center justify-center overflow-auto bg-gray-50">
-            {previewLoading ? (
-              <Spin />
-            ) : previewUrl ? (
-              <img
-                src={previewUrl}
-                alt={previewFileName}
-                style={{
-                  maxWidth: "100%",
-                  maxHeight: 500,
-                  objectFit: "contain",
-                }}
-              />
-            ) : previewContent ? (
-              <pre
-                style={{
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-all",
-                  fontSize: 14,
-                  color: "#222",
-                  maxHeight: 500,
-                }}
-              >
-                {previewContent}
-              </pre>
-            ) : (
-              <span className="text-gray-500 text-sm">
-                {t("dataManagement.detail.previewEmpty")}
-              </span>
-            )}
+          <div className="flex-1 border border-gray-200 rounded-md overflow-hidden">
+            <FilePreview
+              fileName={previewFileName}
+              content={previewContent}
+              blobUrl={previewUrl}
+              blob={previewBlob}
+              loading={previewLoading}
+            />
           </div>
 
           {/* 右侧文件信息（来自 t_dm_dataset_files） */}
@@ -716,6 +749,40 @@ export default function Overview({ dataset, filesOperation, fetchDataset }) {
             </div>
           </div>
         </div>
+      </Modal>
+      {/* 删除确认弹窗 */}
+      <DeleteConfirmModal
+        visible={deleteModal.visible}
+        title={
+          deleteModal.type === "directory"
+            ? t("dataManagement.confirm.deleteFolderTitle")
+            : t("dataManagement.confirm.deleteFileTitle")
+        }
+        message={
+          deleteModal.type === "directory"
+            ? t("dataManagement.confirm.deleteFolderDesc", { itemName: deleteModal.fileName })
+            : t("dataManagement.confirm.deleteFileDesc", { itemName: deleteModal.fileName })
+        }
+        itemName={deleteModal.fileName}
+        onConfirm={handleConfirmDelete}
+        onCancel={handleCancelDelete}
+      />
+
+      {/* 批量删除确认弹窗 */}
+      <Modal
+        title={t("dataManagement.confirm.batchDeleteTitle")}
+        open={batchDeleteModal.visible}
+        onOk={handleConfirmBatchDelete}
+        onCancel={() => setBatchDeleteModal({ visible: false, count: 0 })}
+        okText={t("dataManagement.confirm.deleteConfirm")}
+        cancelText={t("dataManagement.confirm.deleteCancel")}
+        okButtonProps={{ danger: true }}
+      >
+        <p>
+          {t("dataManagement.confirm.batchDeleteDesc", {
+            count: batchDeleteModal.count,
+          })}
+        </p>
       </Modal>
     </>
   );

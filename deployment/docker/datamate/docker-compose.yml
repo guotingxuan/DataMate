@@ -9,8 +9,11 @@ services:
     restart: on-failure
     privileged: true
     environment:
-      - DB_PASSWORD=${DB_PASSWORD:-password}
+      - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD is required. Set in .env file}
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required. Set in .env file}
       - datamate.jwt.enable=${DATAMATE_JWT_ENABLE:-false}
+      - LOG_ROTATION_MAX_SIZE=${LOG_ROTATION_MAX_SIZE:-100MB}
+      - LOG_ROTATION_BACKUP_COUNT=${LOG_ROTATION_BACKUP_COUNT:-30}
     volumes:
       - dataset_volume:/dataset
       - flow_volume:/flow
@@ -26,11 +29,26 @@ services:
     image: ${REGISTRY:-}datamate-backend-python:${VERSION:-latest}
     restart: on-failure
     privileged: true
+    ports:
+      - "18000:18000"
     environment:
       - log_level=DEBUG
-      - pgsql_password=${DB_PASSWORD:-password}
+      - LOG_ROTATION_MAX_SIZE=${LOG_ROTATION_MAX_SIZE:-100MB}
+      - LOG_ROTATION_BACKUP_COUNT=${LOG_ROTATION_BACKUP_COUNT:-30}
+      - LOG_PVC_MONITOR_ENABLED=${LOG_PVC_MONITOR_ENABLED:-true}
+      - LOG_PVC_MONITOR_PATH=${LOG_PVC_MONITOR_PATH:-/var/log/datamate}
+      - LOG_PVC_MONITOR_THRESHOLD=${LOG_PVC_MONITOR_THRESHOLD:-0.9}
+      - LOG_PVC_MONITOR_INTERVAL_SECONDS=${LOG_PVC_MONITOR_INTERVAL_SECONDS:-300}
+      - LOG_PVC_MONITOR_DELETE_BATCH_SIZE=${LOG_PVC_MONITOR_DELETE_BATCH_SIZE:-10}
+      - LOG_PVC_MONITOR_FILE_SUFFIXES=${LOG_PVC_MONITOR_FILE_SUFFIXES:-log,out,err}
+      - PGSQL_HOST=datamate-database
+      - PGSQL_PORT=5432
+      - pgsql_password=${DB_PASSWORD:?DB_PASSWORD is required. Set in .env file}
       - datamate_jwt_enable=${DATAMATE_JWT_ENABLE:-false}
       - milvus_uri=${MILVUS_URI:-http://milvus:19530}
+      - LABEL_STUDIO_USERNAME=${LABEL_STUDIO_USERNAME:-admin@demo.com}
+      - LABEL_STUDIO_USER_TOKEN=${LABEL_STUDIO_USER_TOKEN:-}
+      - LABEL_STUDIO_PASSWORD=${LABEL_STUDIO_PASSWORD:-}
     volumes:
       - dataset_volume:/dataset
       - flow_volume:/flow
@@ -50,8 +68,12 @@ services:
     ports:
       - '8080:8080'
     environment:
-      - JWT_SECRET=default-insecure-key-change-in-production
+      - JWT_SECRET=${JWT_SECRET:-}
       - datamate.jwt.enable=${DATAMATE_JWT_ENABLE:-false}
+      - LOG_ROTATION_MAX_SIZE=${LOG_ROTATION_MAX_SIZE:-100MB}
+      - LOG_ROTATION_BACKUP_COUNT=${LOG_ROTATION_BACKUP_COUNT:-30}
+    volumes:
+      - log_volume:/var/log/datamate
     networks: [ datamate ]
 
   datamate-frontend:
@@ -60,6 +82,9 @@ services:
     restart: on-failure
     ports:
       - "30000:3000"
+    environment:
+      - LOG_ROTATION_MAX_SIZE=${LOG_ROTATION_MAX_SIZE:-100MB}
+      - LOG_ROTATION_BACKUP_COUNT=${LOG_ROTATION_BACKUP_COUNT:-30}
     volumes:
       - frontend_log_volume:/var/log/datamate/frontend
     networks: [ datamate ]
@@ -73,7 +98,8 @@ services:
     restart: on-failure
     environment:
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=${DB_PASSWORD:-password}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:?DB_PASSWORD is required. Set in .env file}
+      - LOG_ROTATION_BACKUP_COUNT=${LOG_ROTATION_BACKUP_COUNT:-30}
     volumes:
       - postgresql_volume:/var/lib/postgresql/data
       - database_log_volume:/var/log/datamate/database
@@ -88,10 +114,12 @@ services:
     environment:
       RAY_DEDUP_LOGS: "0"
       RAY_TQDM_PATCH_PRINT: "0"
+      LOG_ROTATION_MAX_SIZE: ${LOG_ROTATION_MAX_SIZE:-100MB}
+      LOG_ROTATION_BACKUP_COUNT: ${LOG_ROTATION_BACKUP_COUNT:-30}
       PG_HOST: "datamate-database"
       PG_PORT: "5432"
       PG_USER: "postgres"
-      PG_PASSWORD: ${DB_PASSWORD:-password}
+      PG_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required. Set in .env file}
       PG_DATABASE: "datamate"
     command:
       - python
@@ -204,16 +232,15 @@ services:
   # ==============================
   label-studio-pgbouncer:
     container_name: label-studio-pgbouncer
-    image: pgbouncer/pgbouncer:latest
+    image: edoburu/pgbouncer:latest
     restart: on-failure
-    ports:
-      - "6432:6432"
     environment:
-      - DATABASES_HOST=datamate-database
-      - DATABASES_PORT=5432
-      - DATABASES_NAME=labelstudio
-      - DATABASES_USER=postgres
-      - DATABASES_PASSWORD=${DB_PASSWORD:-password}
+      - DB_HOST=datamate-database
+      - DB_PORT=5432
+      - DB_NAME=labelstudio
+      - DB_USER=postgres
+      - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD is required. Set in .env file}
+      - AUTH_TYPE=scram-sha-256
       - POOL_MODE=transaction
       - MAX_CLIENT_CONN=100
       - DEFAULT_POOL_SIZE=20
@@ -240,17 +267,17 @@ services:
       - DJANGO_DB=default
       - POSTGRE_NAME=labelstudio
       - POSTGRE_USER=postgres
-      - POSTGRE_PASSWORD=${DB_PASSWORD:-password}
-      - POSTGRE_PORT=6432
+      - POSTGRE_PASSWORD=${DB_PASSWORD:?DB_PASSWORD is required. Set in .env file}
+      - POSTGRE_PORT=5432
       - POSTGRE_HOST=label-studio-pgbouncer
       - LABEL_STUDIO_HOST=${LABEL_STUDIO_HOST:-}
       - LOCAL_FILES_SERVING_ENABLED=true
       - LOCAL_FILES_DOCUMENT_ROOT=/label-studio/local
       - USE_USERNAME_FOR_LOGIN=true
       - LABEL_STUDIO_USERNAME=admin@demo.com
-      - LABEL_STUDIO_PASSWORD=demoadmin
+      - LABEL_STUDIO_PASSWORD=${LABEL_STUDIO_PASSWORD:-}
       - LABEL_STUDIO_ENABLE_LEGACY_API_TOKEN=true
-      - LABEL_STUDIO_USER_TOKEN=abc123abc123
+      - LABEL_STUDIO_USER_TOKEN=${LABEL_STUDIO_USER_TOKEN:-}
       - LOG_LEVEL=DEBUG
     volumes:
       - label-studio-data:/label-studio/data:rw
@@ -289,8 +316,8 @@ services:
     container_name: milvus-minio
     image: minio/minio:RELEASE.2024-12-18T13-15-44Z
     environment:
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-}
     ports:
       - "9001:9001"
       - "9000:9000"

@@ -32,8 +32,50 @@
 - Make (用于构建和安装)
 - Docker (用于构建镜像和部署服务)
 - Docker-Compose (用于部署服务-docker方式)
-- kubernetes (用于部署服务-k8s方式)
+- Kubernetes (用于部署服务-k8s方式)
 - Helm (用于部署服务-k8s方式)
+- **K8s 部署额外需要**: [Sealed Secrets Controller](https://github.com/bitnami-labs/sealed-secrets)（用于加密管理敏感配置）
+
+### 密钥管理（仅 K8s 部署需要）
+
+DataMate K8s 部署使用 **Bitnami Sealed Secrets** 管理数据库密码、JWT 密钥等敏感信息。所有密钥以加密形式存储在 Git 中（`deployment/kubernetes/sealed-secrets/`），部署时由集群内的 Sealed Secrets Controller 自动解密。
+
+**在线环境安装 Sealed Secrets Controller：**
+
+```bash
+# 通过 Helm 安装（推荐）
+helm repo add sealed-secrets https://bitnami-labs.github.io/sealed-secrets
+helm install sealed-secrets sealed-secrets/sealed-secrets -n kube-system
+
+# 验证安装
+kubectl get pods -n kube-system | grep sealed-secrets
+```
+
+**离线环境：**
+
+1. 在有网络的机器上下载 Sealed Secrets 镜像：
+   ```bash
+   # 下载 controller 镜像（约 60MB）
+   docker pull bitnami/sealed-secrets-controller:latest
+   docker save bitnami/sealed-secrets-controller:latest -o sealed-secrets-controller.tar
+   
+   # 下载 kubeseal 工具（用于更新密钥）
+   # macOS:
+   brew install kubeseal
+   # Linux:
+   wget https://github.com/bitnami-labs/sealed-secrets/releases/latest/download/kubeseal-linux-amd64
+   ```
+
+2. 将镜像导入离线环境的镜像仓库，通过 Helm 安装时指定镜像地址。
+
+**更新密钥：**
+
+```bash
+# 如果数据库密码等敏感信息发生变更，使用 kubeseal 重新加密
+echo -n "new-password" | kubeseal --raw --name datamate-conf --namespace datamate --scope namespace-wide
+```
+
+> 注意：Docker 部署方式不需要 Sealed Secrets，密钥统一通过 `.env` 文件管理（已在 `.gitignore` 中排除）。
 
 ### Docker一键部署
 ```shell
@@ -109,6 +151,29 @@ make uninstall
 ```
 
 在运行 `make uninstall` 时，卸载流程会只询问一次是否删除卷（数据），该选择会应用到所有组件。卸载顺序为：milvus -> label-studio -> datamate，确保在移除 datamate 网络前，所有使用该网络的服务已先停止。
+
+## 📚 文档
+
+### 核心文档
+- **[DEVELOPMENT.md](./DEVELOPMENT.md)** - 本地开发环境搭建和工作流程
+- **[AGENTS.md](./AGENTS.md)** - AI 助手指南和代码规范
+
+### 后端文档
+- **[backend/README-zh.md](./backend/README-zh.md)** - 后端架构、服务和技术栈
+- **[backend/api-gateway/README-zh.md](./backend/api-gateway/README-zh.md)** - API Gateway 配置和路由
+- **[backend/services/main-application/README-zh.md](./backend/services/main-application/README-zh.md)** - 主应用模块
+- **[backend/shared/README-zh.md](./backend/shared/README-zh.md)** - 共享库（domain-common, security-common）
+
+### 运行时文档
+- **[runtime/README-zh.md](./runtime/README-zh.md)** - 运行时架构和组件
+- **[runtime/datamate-python/README-zh.md](./runtime/datamate-python/README-zh.md)** - FastAPI 后端服务
+- **[runtime/python-executor/README-zh.md](./runtime/python-executor/README-zh.md)** - Ray 执行器框架
+- **[runtime/ops/README.md](./runtime/ops/README.md)** - 算子生态
+- **[runtime/datax/README-zh.md](./runtime/datax/README-zh.md)** - DataX 数据框架
+- **[runtime/deer-flow/README-zh.md](./runtime/deer-flow/README-zh.md)** - DeerFlow LLM 服务
+
+### 前端文档
+- **[frontend/README-zh.md](./frontend/README-zh.md)** - React 前端应用
 
 ## 🤝 贡献指南
 

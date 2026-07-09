@@ -11,6 +11,7 @@ import {
   Switch,
 } from "antd";
 import { ConfigI, OperatorI } from "@/pages/OperatorMarket/operator.model";
+import { useTranslation } from "react-i18next";
 
 interface ParamConfigProps {
   operator: OperatorI;
@@ -25,6 +26,7 @@ const ParamConfig: React.FC<ParamConfigProps> = ({
   param,
   onParamChange,
 }) => {
+  const { t } = useTranslation();
   if (!param) return null;
   let defaultVal: any = operator.overrides?.[paramKey] ?? param.defaultVal;
   if (param.type === "range") {
@@ -53,7 +55,7 @@ const ParamConfig: React.FC<ParamConfigProps> = ({
           <Input
             value={value}
             onChange={(e) => updateValue(e.target.value)}
-            placeholder={`请输入${param.name}`}
+            placeholder={t("dataCleansing.paramConfig.enterValue", { name: param.name })}
             className="w-full"
           />
         </Form.Item>
@@ -100,7 +102,8 @@ const ParamConfig: React.FC<ParamConfigProps> = ({
           </Radio.Group>
         </Form.Item>
       );
-    case "checkbox":
+    case "checkbox": {
+      const group = Array.isArray(value) ? value: value.split(",").map(item => item.trim()).filter(Boolean);
       return (
         <Form.Item
           label={param.name}
@@ -108,12 +111,13 @@ const ParamConfig: React.FC<ParamConfigProps> = ({
           key={paramKey}
         >
           <Checkbox.Group
-            value={value}
+            value={group}
             onChange={updateValue}
             options={param.options || []}
           />
         </Form.Item>
       );
+    }
     case "slider":
       return (
         <Form.Item
@@ -200,7 +204,7 @@ const ParamConfig: React.FC<ParamConfigProps> = ({
           <InputNumber
             value={value}
             onChange={(val) => updateValue(val)}
-            placeholder={`请输入${param.name}`}
+            placeholder={t("dataCleansing.paramConfig.enterValue", { name: param.name })}
             className="w-full"
             min={param.min}
             max={param.max}

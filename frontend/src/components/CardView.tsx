@@ -43,7 +43,15 @@ interface CardViewProps<T> {
         key: string;
         label: string;
         danger?: boolean;
+        disabled?: boolean;
         icon?: React.JSX.Element;
+        confirm?: {
+          title: string;
+          description?: string;
+          okText?: string;
+          cancelText?: string;
+          okType?: "default" | "primary" | "danger";
+        };
         onClick?: (item: T) => void;
       }[]
     | ((item: T) => ItemType[]);
@@ -293,11 +301,15 @@ function CardView<T extends BaseCardDataType>(props: CardViewProps<T>) {
                   <TagsRenderer tags={Array.isArray(item?.tags) ? item.tags : []} />
 
                   {/* Description */}
-                  <p className="text-gray-400 text-xs text-ellipsis overflow-hidden whitespace-nowrap line-clamp-2 mt-3 mb-2">
-                    <Tooltip title={item?.description}>
+                  <Tooltip
+                    title={item?.description}
+                    placement="topLeft"
+                    getPopupContainer={(triggerNode) => triggerNode.parentElement || document.body}
+                  >
+                    <p className="text-gray-400 text-xs text-ellipsis overflow-hidden whitespace-nowrap line-clamp-2 mt-3 mb-2">
                       {item?.description}
-                    </Tooltip>
-                  </p>
+                    </p>
+                  </Tooltip>
 
                   {/* Statistics */}
                   <div className="grid grid-cols-2 gap-4 py-2">
@@ -327,11 +339,9 @@ function CardView<T extends BaseCardDataType>(props: CardViewProps<T>) {
                 {operations && (
                   <ActionDropdown
                     actions={ops(item)}
+                    item={item}
                     onAction={(key) => {
-                      const operation = ops(item).find((op) => op.key === key);
-                      if (operation?.onClick) {
-                        operation.onClick(item);
-                      }
+                      // ActionDropdown 已经处理了 onClick 调用
                     }}
                   />
                 )}

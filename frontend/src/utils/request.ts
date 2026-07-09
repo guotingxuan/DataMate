@@ -1,6 +1,7 @@
 import {message} from "antd";
 import Loading from "./loading";
 import {errorConfigStore} from "@/utils/errorConfigStore.ts";
+import i18n from "@/i18n";
 
 /**
  * 通用请求工具类
@@ -214,13 +215,21 @@ class Request {
    * 处理XHR响应
    */
   async handleXHRResponse(xhrResponse, config) {
-    // 模拟fetch响应格式用于拦截器
+    // 模拟fetch响应格式用于拦截器（添加 clone/json 方法）
     const mockResponse = {
       ok: xhrResponse.status >= 200 && xhrResponse.status < 300,
       status: xhrResponse.status,
       statusText: xhrResponse.statusText,
       headers: {
         get: (key) => xhrResponse.xhr.getResponseHeader(key),
+      },
+      data: xhrResponse.data,
+      clone: () => mockResponse,
+      json: async () => {
+        if (typeof xhrResponse.data === "string") {
+          return JSON.parse(xhrResponse.data);
+        }
+        return xhrResponse.data;
       },
     };
 
@@ -279,6 +288,8 @@ class Request {
 
     const config = {
       method: "GET",
+      credentials: "include",
+      mode: "cors",
       headers: {
         ...this.defaultHeaders,
         ...options.headers,
@@ -298,6 +309,8 @@ class Request {
   async post(url, data = {}, options = {}) {
     let config = {
       method: "POST",
+      credentials: "include",
+      mode: "cors",
       headers: {
         ...this.defaultHeaders,
         ...options.headers,
@@ -310,6 +323,8 @@ class Request {
     if (isFormData) {
       config = {
         method: "POST",
+        credentials: "include",
+        mode: "cors",
         headers: {
           ...options.headers, // FormData不需要Content-Type
         },
@@ -329,6 +344,8 @@ class Request {
   async put(url, data = null, options = {}) {
     const config = {
       method: "PUT",
+      credentials: "include",
+      mode: "cors",
       headers: {
         ...this.defaultHeaders,
         ...options.headers,
@@ -389,6 +406,68 @@ class Request {
   }
 
   /**
+   * PATCH请求
+   * @param {string} url - 请求URL
+   * @param {object} data - 请求体数据
+   * @param {object} options - 额外的fetch选项，包括showLoading, onUploadProgress, onDownloadProgress
+   */
+  async patch(url, data = null, options = {}) {
+    const config = {
+      method: "PATCH",
+      credentials: "include",
+      mode: "cors",
+      headers: {
+        ...this.defaultHeaders,
+        ...options.headers,
+      },
+      body: data ? JSON.stringify(data) : undefined,
+      ...options,
+    };
+
+    return this.request(this.baseURL + url, config);
+  }
+
+  /**
+   * 从 Content-Disposition 头中解析文件名
+   */
+  parseContentDisposition(contentDisposition) {
+    if (!contentDisposition) return null;
+
+    // 匹配 filename="..." 或 filename=...
+    const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
+    const matches = filenameRegex.exec(contentDisposition);
+
+    if (matches && matches[1]) {
+      let fileName = matches[1].replace(/['"]/g, '');
+      // 处理 URL 编码的文件名（如中文文件名）
+      try {
+        fileName = decodeURIComponent(fileName);
+      } catch {
+        // 如果解码失败，使用原始文件名
+      }
+      return fileName;
+    }
+
+    return null;
+  }
+
+  /**
+   * 获取当前认证 token
+   */
+  getAuthToken() {
+    const session = localStorage.getItem("session");
+    if (session) {
+      try {
+        const sessionData = JSON.parse(session);
+        return sessionData.token;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  /**
    * 下载文件
    * @param {string} url - 请求URL
    * @param {object} params - 查询参数
@@ -397,89 +476,56 @@ class Request {
    * @param {object} options - 额外的fetch选项，包括showLoading, onDownloadProgress
    */
   async download(url, params = null, filename = "", action = "download", options = {}) {
-    const fullURL = this.buildURL(url, params);
+    // 对于预览，使用 fetch + blob 方式
+    if (action === "preview") {
+      const fullURL = this.buildURL(url, params);
+      const config = {
+        method: "GET",
+        ...options,
+      };
 
-    const config = {
-      method: "GET",
-      responseType: "blob",
-      ...options,
-    };
-
-    // 执行请求拦截器
-    const processedConfig = await this.executeRequestInterceptors(config);
-
-    let blob;
-    let name = filename;
-
-    // 如果需要下载进度监听，使用XMLHttpRequest
-    if (config.onDownloadProgress) {
-      const xhrResponse = await this.createXHRWithProgress(
-        fullURL,
-        { ...processedConfig, responseType: "blob" },
-        null,
-        config.onDownloadProgress
-      );
-
-      if (xhrResponse.status < 200 || xhrResponse.status >= 300) {
-        throw new Error(`HTTP error! status: ${xhrResponse.status}`);
-      }
-
-      blob = xhrResponse.xhr.response;
-      name =
-        name ||
-        xhrResponse.headers.get("Content-Disposition")?.split("filename=")[1] ||
-        "download";
-    } else {
-      // 使用fetch
+      const processedConfig = await this.executeRequestInterceptors(config);
       const response = await fetch(fullURL, processedConfig);
 
-      // 执行响应拦截器
-      const processedResponse = await this.executeResponseInterceptors(
-        response,
-        processedConfig
-      );
-
-      if (!processedResponse.ok) {
-        throw new Error(`HTTP error! status: ${processedResponse.status}`);
+      // 文件预览不需要执行响应拦截器（因为响应是二进制数据，不是JSON）
+      // 直接检查响应状态
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      blob = await processedResponse.blob();
-      name =
-        name ||
-        response.headers.get("Content-Disposition")?.split("filename=")[1] ||
-        `download_${Date.now()}`;
-    }
-
-    if (action === "download") {
-      // 创建下载链接
-      const downloadUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = downloadUrl;
-      link.download = filename ?? name;
-
-      // 添加到DOM并触发下载
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-
-      // 清理URL对象
-      window.URL.revokeObjectURL(downloadUrl);
-    } else if (action === "preview") {
-      // 预览逻辑 - 返回Blob URL和相关信息
+      const blob = await response.blob();
       const blobUrl = window.URL.createObjectURL(blob);
+      const name = filename || this.parseContentDisposition(response.headers.get("Content-Disposition")) || `download_${Date.now()}`;
 
-      // 可以返回更多信息用于预览
       return {
         blob,
         blobUrl,
         filename: name,
         size: blob.size,
-        // 自动清理的钩子
         revoke: () => window.URL.revokeObjectURL(blobUrl)
       };
     }
 
-    return blob;
+    // 对于下载，使用原生 <a> 标签 + token 参数
+    if (action === "download") {
+      // 获取 token 并添加到 URL 参数中
+      const token = this.getAuthToken();
+      const downloadParams = token ? { ...params, token } : params;
+      const fullURL = this.buildURL(url, downloadParams);
+
+      // 创建隐藏的 <a> 标签触发下载
+      const link = document.createElement("a");
+      link.href = fullURL;
+      link.download = filename || `download_${Date.now()}`;
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      return { success: true };
+    }
+
+    return {};
   }
 
   /**
@@ -517,35 +563,53 @@ request.addRequestInterceptor((config) => {
       if (sessionData.token) {
         config.headers = {
           ...config.headers,
-          Authorization: `Bearer ${sessionData.token}`,
+          'Authorization': `Bearer ${sessionData.token}`,
         };
       }
     } catch (e) {
       console.error('Failed to parse session data', e);
     }
   }
+
+  const language = i18n.language || localStorage.getItem('language') || 'zh';
+  config.headers = {
+    ...config.headers,
+    'Accept-Language': language,
+  };
+
   return config;
 });
 
 // --- 常量配置 ---
 const DEFAULT_ERROR_MSG = '系统繁忙，请稍后重试';
 // 需要触发重新登录的 Code 集合 (包含 HTTP 401 和 业务 Token 过期码)
-const AUTH_ERR_CODES = [401, '401'];
+// 注意：后端返回的是 "common.0401"（有前导零）
+const AUTH_ERR_CODES = [401, '401', 'common.401', 'common.0401'];
 
 // --- 辅助函数：防抖处理登录失效 ---
 let isRelogging = false;
+// 全局标记：是否需要登录（从 /api/user/me 获取）
+let requireLoginMode = false;
+
+// 设置是否需要登录
+export function setRequireLoginMode(value: boolean) {
+  requireLoginMode = value;
+}
+
 const handleLoginRedirect = () => {
-  if (isRelogging) return;
+  // 如果不需要登录，直接返回
+  if (!requireLoginMode) {
+    return;
+  }
+
+  if (isRelogging) {
+    return;
+  }
   isRelogging = true;
 
-  // 1. 清除 Session / Token
   localStorage.removeItem('session');
+  window.dispatchEvent(new CustomEvent('show-login'));
 
-  // 2. 触发登录弹窗事件 (根据你的架构，这里可以是 dispatch event 或 router 跳转)
-  const loginEvent = new CustomEvent('show-login');
-  window.dispatchEvent(loginEvent);
-
-  // 3. 重置标志位 (3秒后才允许再次触发)
   setTimeout(() => {
     isRelogging = false;
   }, 3000);
@@ -559,8 +623,6 @@ request.addResponseInterceptor(async (response, config) => {
 
   const { status } = response;
 
-  // ------------------ 修改重点开始 ------------------
-
   let resData: {};
 
   try {
@@ -571,7 +633,6 @@ request.addResponseInterceptor(async (response, config) => {
   } catch (e) {
     // 如果后端返回的不是 JSON (比如 404 HTML 页面，或者空字符串)，json() 会报错
     // 这里捕获异常，保证 resData 至少是个空对象，不会导致后面取值 crash
-    console.warn('响应体不是有效的JSON:', e);
     resData = {};
   }
 
@@ -603,7 +664,8 @@ request.addResponseInterceptor(async (response, config) => {
   }
 
   // 7. 处理 Token 过期 / 未登录
-  if (AUTH_ERR_CODES.includes(code) || AUTH_ERR_CODES.includes(codeStr)) {
+  const isAuthError = AUTH_ERR_CODES.includes(code) || AUTH_ERR_CODES.includes(codeStr);
+  if (isAuthError) {
     handleLoginRedirect();
   }
 
@@ -621,6 +683,7 @@ export const get = request.get.bind(request);
 export const post = request.post.bind(request);
 export const put = request.put.bind(request);
 export const del = request.delete.bind(request);
+export const patch = request.patch.bind(request);
 export const download = request.download.bind(request);
 export const upload = request.upload.bind(request);
 

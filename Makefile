@@ -46,6 +46,7 @@ help:
 	@echo "  make install                        Install datamate + milvus (prompts for method)"
 	@echo "  make install INSTALLER=docker       Install using Docker Compose"
 	@echo "  make install INSTALLER=k8s          Install using Kubernetes/Helm"
+	@echo "  make install INSTALLER=k8s          (requires Sealed Secrets Controller)"
 	@echo "  make install-<component>            Install specific component (prompts)"
 	@echo "  make <component>-docker-install     Install component via Docker"
 	@echo "  make <component>-k8s-install        Install component via Kubernetes"
@@ -69,9 +70,12 @@ help:
 	@echo "  make download VERSION=<version>     Pull all images with specific version"
 	@echo "  make download REGISTRY=<registry>   Pull images from specific registry"
 	@echo "  make load-images                    Load all downloaded images from dist/"
+	@echo "  make download-sealed-secrets        Download Sealed Secrets image (for offline)"
 	@echo ""
 	@echo "Utility Commands:"
 	@echo "  make create-namespace          Create Kubernetes namespace"
+	@echo "  make node-setup               Configure dedicated nodes interactively"
+	@echo "  make node-cleanup             Remove node labels and taints"
 	@echo "  make help                      Show this help message"
 	@echo ""
 	@echo "Examples:"
@@ -192,6 +196,26 @@ build: database-docker-build gateway-docker-build backend-docker-build frontend-
 create-namespace:
 	kubectl get namespace $(NAMESPACE) > /dev/null 2>&1 || kubectl create namespace $(NAMESPACE)
 
+# ========== Node Setup/Cleanup Targets ==========
+
+.PHONY: node-setup
+node-setup:
+	@echo "Configure dedicated nodes for DataMate deployment?"
+	@echo "This will apply labels and optional taints to selected nodes."
+	@echo "1. Yes - Configure nodes interactively"
+	@echo "2. No - Use default scheduling"
+	@echo -n "Enter choice (default: 2): "
+	@read NODE_SETUP_CHOICE; \
+	if [ "$$NODE_SETUP_CHOICE" = "1" ]; then \
+		chmod +x scripts/k8s/node-setup.sh; \
+		./scripts/k8s/node-setup.sh --namespace $(NAMESPACE); \
+	fi
+
+.PHONY: node-cleanup
+node-cleanup:
+	@chmod +x scripts/k8s/node-cleanup.sh
+	@./scripts/k8s/node-cleanup.sh --namespace $(NAMESPACE)
+
 # ========== Generic Install/Uninstall Targets (Redirect to prompt-installer) ==========
 
 .PHONY: install-%
@@ -209,6 +233,7 @@ ifeq ($(origin INSTALLER), undefined)
 else
 	$(MAKE) datamate-$(INSTALLER)-install
 	$(MAKE) milvus-$(INSTALLER)-install
+	@rm -f /tmp/datamate-helm-args.sh
 endif
 
 .PHONY: uninstall-%
@@ -252,6 +277,13 @@ VALID_SERVICE_TARGETS := datamate backend frontend runtime backend-python databa
 		for target in $(VALID_SERVICE_TARGETS); do \
 			echo "  - $$target"; \
 		done; \
+		exit 1; \
+	fi
+	@if [ ! -f deployment/docker/datamate/.env ]; then \
+		echo "ERROR: deployment/docker/datamate/.env not found."; \
+		echo "Create it from the template:"; \
+		echo "  cp deployment/docker/datamate/.env.example deployment/docker/datamate/.env"; \
+		echo "Then edit it with your actual passwords."; \
 		exit 1; \
 	fi
 	@if [ "$*" = "label-studio" ]; then \
@@ -326,19 +358,54 @@ VALID_K8S_TARGETS := datamate deer-flow milvus label-studio data-juicer mineru m
 		exit 1; \
 	fi
 	@if [ "$*" = "label-studio" ]; then \
-     	helm upgrade label-studio deployment/helm/label-studio/ -n $(NAMESPACE) --install; \
+		if [ -f /tmp/datamate-helm-args.sh ]; then . /tmp/datamate-helm-args.sh; fi; \
+		helm upgrade label-studio deployment/helm/label-studio/ -n $(NAMESPACE) --install $${HELM_LABEL_STUDIO_TOLERATIONS:-}; \
     elif [ "$*" = "mineru" ] || [ "$*" = "mineru-910B" ] || [ "$*" = "mineru-910C" ]; then \
 		kubectl apply -f deployment/kubernetes/mineru/deploy-910.yaml -n $(NAMESPACE); \
 	elif [ "$*" = "mineru-310P" ]; then \
 		kubectl apply -f deployment/kubernetes/mineru/deploy-310.yaml -n $(NAMESPACE); \
 	elif [ "$*" = "datamate" ]; then \
-		helm upgrade datamate deployment/helm/datamate/ -n $(NAMESPACE) --install --set global.image.repository=$(REGISTRY); \
+		echo ""; \
+		chmod +x scripts/k8s/node-setup.sh; \
+		./scripts/k8s/node-setup.sh --namespace $(NAMESPACE); \
+		if [ -f /tmp/datamate-helm-args.sh ]; then \
+			. /tmp/datamate-helm-args.sh; \
+		fi; \
+		chmod +x scripts/k8s/collect-secrets.sh; \
+		eval $$(NAMESPACE=$(NAMESPACE) bash scripts/k8s/collect-secrets.sh); \
+		if [ "$$SECRETS_CREATE" = "SKIP" ]; then \
+			echo "[SKIP] Secrets collection failed — skipping datamate Helm install"; \
+			rm -f /tmp/datamate-helm-args.sh; \
+			exit 0; \
+		fi; \
+		if [ -n "$$HELM_VALUES_FILE" ] && [ -f "$$HELM_VALUES_FILE" ]; then \
+			HELM_EXTRA_ARGS="-f $$HELM_VALUES_FILE"; \
+		else \
+			HELM_EXTRA_ARGS=""; \
+		fi; \
+		if [ -n "$$HELM_NODE_SELECTOR_ARGS" ] || [ -n "$$HELM_TOLERATIONS_ARGS" ]; then \
+			helm upgrade datamate deployment/helm/datamate/ -n $(NAMESPACE) --install --force --set global.image.repository=$(REGISTRY) --set public.secrets.create=$$SECRETS_CREATE --set public.persistentVolumeClaim.accessModes=ReadWriteOnce $$HELM_EXTRA_ARGS $$HELM_NODE_SELECTOR_ARGS $$HELM_TOLERATIONS_ARGS; \
+		else \
+			helm upgrade datamate deployment/helm/datamate/ -n $(NAMESPACE) --install --force --set global.image.repository=$(REGISTRY) --set public.secrets.create=$$SECRETS_CREATE --set public.persistentVolumeClaim.accessModes=ReadWriteOnce $$HELM_EXTRA_ARGS; \
+		fi; \
+		rm -f /tmp/datamate-secret-values-*.yaml; \
 	elif [ "$*" = "deer-flow" ]; then \
 		cp runtime/deer-flow/.env deployment/helm/deer-flow/charts/public/.env; \
 		cp runtime/deer-flow/conf.yaml deployment/helm/deer-flow/charts/public/conf.yaml; \
 		helm upgrade deer-flow deployment/helm/deer-flow -n $(NAMESPACE) --install --set global.image.repository=$(REGISTRY); \
 	elif [ "$*" = "milvus" ]; then \
-		helm upgrade milvus deployment/helm/milvus -n $(NAMESPACE) --install; \
+		chmod +x scripts/k8s/collect-secrets.sh; \
+		bash scripts/k8s/collect-secrets.sh --component milvus -n $(NAMESPACE); \
+		MILVUS_MINIO_ACCESS_KEY=$$(kubectl get secret milvus-minio-secret -n $(NAMESPACE) -o jsonpath='{.data.accesskey}' | base64 -d); \
+		MILVUS_MINIO_SECRET_KEY=$$(kubectl get secret milvus-minio-secret -n $(NAMESPACE) -o jsonpath='{.data.secretkey}' | base64 -d); \
+		if [ -f /tmp/datamate-helm-args.sh ]; then \
+			. /tmp/datamate-helm-args.sh; \
+		fi; \
+		helm upgrade milvus deployment/helm/milvus -n $(NAMESPACE) --install \
+			--set minio.accessKey="$$MILVUS_MINIO_ACCESS_KEY" \
+			--set minio.secretKey="$$MILVUS_MINIO_SECRET_KEY" \
+			--set log.persistence.persistentVolumeClaim.accessModes=ReadWriteOnce \
+			$$HELM_MILVUS_TOLERATIONS; \
 	elif [ "$*" = "data-juicer" ] || [ "$*" = "dj" ]; then \
 		kubectl apply -f deployment/kubernetes/data-juicer/deploy.yaml -n $(NAMESPACE); \
 	fi
@@ -360,6 +427,7 @@ VALID_K8S_TARGETS := datamate deer-flow milvus label-studio data-juicer mineru m
 		kubectl delete -f deployment/kubernetes/mineru/deploy-310.yaml -n $(NAMESPACE); \
 	elif [ "$*" = "datamate" ]; then \
 		helm uninstall datamate -n $(NAMESPACE) --ignore-not-found; \
+		$(MAKE) node-cleanup; \
 	elif [ "$*" = "deer-flow" ]; then \
 		helm uninstall deer-flow -n $(NAMESPACE) --ignore-not-found; \
 	elif [ "$*" = "milvus" ]; then \
@@ -470,6 +538,17 @@ DEER_FLOW_IMAGES := \
 .PHONY: download-deer-flow
 download-deer-flow:
 	$(MAKE) download DOWNLOAD_IMAGES="$(DEER_FLOW_IMAGES)"
+
+# Download Sealed Secrets controller image for offline/air-gapped environments
+SEALED_SECRETS_IMAGE := bitnami/sealed-secrets-controller:latest
+.PHONY: download-sealed-secrets
+download-sealed-secrets:
+	@echo "Pulling Sealed Secrets controller image..."
+	@mkdir -p dist
+	docker pull $(SEALED_SECRETS_IMAGE)
+	docker save $(SEALED_SECRETS_IMAGE) -o dist/sealed-secrets-controller.tar
+	@echo "✅ Saved to dist/sealed-secrets-controller.tar"
+	@echo "Transfer to offline environment and load with: docker load -i dist/sealed-secrets-controller.tar"
 
 # Load all downloaded images from dist/ directory
 .PHONY: load-images

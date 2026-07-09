@@ -12,6 +12,7 @@ import { SearchControls } from "@/components/SearchControls";
 import CardView from "@/components/CardView";
 import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
+import i18n from "@/i18n";
 import type {
   CategoryTreeI,
   OperatorI,
@@ -52,6 +53,16 @@ export default function OperatorMarketPage() {
     initCategoriesTree();
   }, []);
 
+  useEffect(() => {
+    const handleLanguageChange = () => {
+      initCategoriesTree();
+    };
+    i18n.on('languageChanged', handleLanguageChange);
+    return () => {
+      i18n.off('languageChanged', handleLanguageChange);
+    };
+  }, [i18n]);
+
   const {
     tableData,
     pagination,
@@ -61,6 +72,11 @@ export default function OperatorMarketPage() {
     handleFiltersChange,
     handleKeywordChange,
   } = useFetchData(queryOperatorsUsingPost, (op) => mapOperator(op, t));
+
+  const handleReload = async () => {
+    fetchData();
+    await initCategoriesTree();
+  };
 
   const handleUploadOperator = () => {
     navigate(`/data/operator-market/create`);
@@ -192,7 +208,7 @@ export default function OperatorMarketPage() {
                 viewMode={viewMode}
                 onViewModeChange={setViewMode}
                 showViewToggle={true}
-                onReload={fetchData}
+                onReload={handleReload}
               />
             </div>
           </div>

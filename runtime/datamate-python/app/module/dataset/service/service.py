@@ -470,6 +470,84 @@ class Service:
             await self.db.rollback()
             return False, str(e), None
 
+    async def replace_file_tags(
+        self,
+        file_id: str,
+        new_tags: List[Dict[str, Any]],
+        template_id: Optional[str] = None
+    ) -> tuple[bool, Optional[str], Optional[datetime]]:
+        """
+        完全替换文件标签（非部分更新）
+
+        与部分更新不同，此方法会完全替换标签列表：
+        - 空列表会清空所有标签
+        - 新标签列表会完全替换原有标签（不合并）
+
+        如果提供了 template_id，会自动将简化格式的标签转换为完整格式。
+
+        Args:
+            file_id: 文件ID
+            new_tags: 新的标签列表（完全替换），可以是简化格式或完整格式，空列表会清空所有标签
+            template_id: 可选的模板ID，用于格式转换
+
+        Returns:
+            (成功标志, 错误信息, 更新时间)
+        """
+        try:
+            logger.info(f"Replacing tags for file: {file_id}, new_tags count: {len(new_tags)}")
+
+            result = await self.db.execute(
+                select(DatasetFiles).where(DatasetFiles.id == file_id)
+            )
+            file_record = result.scalar_one_or_none()
+
+            if not file_record:
+                logger.error(f"File not found: {file_id}")
+                return False, f"File not found: {file_id}", None
+
+            processed_tags = new_tags
+            if template_id and new_tags:
+                logger.debug(f"Converting tags using template: {template_id}")
+
+                try:
+                    from app.db.models import AnnotationTemplate
+                    template_result = await self.db.execute(
+                        select(AnnotationTemplate).where(
+                            AnnotationTemplate.id == template_id,
+                            AnnotationTemplate.deleted_at.is_(None)
+                        )
+                    )
+                    template = template_result.scalar_one_or_none()
+
+                    if not template:
+                        logger.warning(f"Template {template_id} not found, skipping conversion")
+                    else:
+                        from app.module.annotation.utils import create_converter_from_template_config
+
+                        converter = create_converter_from_template_config(template.configuration)  # type: ignore
+                        processed_tags = converter.convert_if_needed(new_tags)
+
+                        logger.info(f"Converted {len(new_tags)} tags to full format")
+
+                except Exception as e:
+                    logger.error(f"Failed to convert tags using template: {e}")
+                    logger.warning("Continuing with original tag format")
+
+            update_time = datetime.utcnow()
+            file_record.tags = processed_tags  # type: ignore
+            file_record.tags_updated_at = update_time  # type: ignore
+
+            await self.db.commit()
+            await self.db.refresh(file_record)
+
+            logger.info(f"Successfully replaced tags for file: {file_id}, new tags count: {len(processed_tags)}")
+            return True, None, update_time
+
+        except Exception as e:
+            logger.error(f"Failed to replace tags for file {file_id}: {e}")
+            await self.db.rollback()
+            return False, str(e), None
+
     @staticmethod
     async def _get_or_create_dataset_directory(dataset: Dataset) -> str:
         """Get or create dataset directory"""
@@ -582,11 +660,19 @@ class Service:
                         dataset.updated_at = datetime.now()
                         dataset.status = 'ACTIVE'
 
-                    # 复制物理文件到目标路径
-                    logger.info(f"copy file {source_path} to {target_path}")
+                    # 创建硬链接（如果跨设备则回退到符号链接）
+                    logger.info(f"creating hard link from {source_path} to {target_path}")
                     dst_dir = os.path.dirname(target_path)
                     await asyncio.to_thread(os.makedirs, dst_dir, exist_ok=True)
-                    await asyncio.to_thread(shutil.copy2, source_path, target_path)
+                    try:
+                        # Try to create hard link first
+                        await asyncio.to_thread(os.link, source_path, target_path)
+                        logger.info(f"hard link created successfully")
+                    except OSError as e:
+                        # Hard link may fail due to cross-device link error, fall back to symbolic link
+                        logger.warning(f"failed to create hard link from {source_path} to {target_path}: {e}, falling back to symbolic link")
+                        await asyncio.to_thread(os.symlink, source_path, target_path)
+                        logger.info(f"symbolic link created successfully")
 
                     await self.db.commit()
 
@@ -621,11 +707,19 @@ class Service:
             dataset.size_bytes = dataset.size_bytes + file_record.file_size
             dataset.updated_at = datetime.now()
             dataset.status = 'ACTIVE'
-        # Copy file
-        logger.info(f"copy file {source_path} to {target_path}")
+        # Create hard link (fallback to symbolic link if cross-device)
+        logger.info(f"creating hard link from {source_path} to {target_path}")
         dst_dir = os.path.dirname(target_path)
         await asyncio.to_thread(os.makedirs, dst_dir, exist_ok=True)
-        await asyncio.to_thread(shutil.copy2, source_path, target_path)
+        try:
+            # Try to create hard link first
+            await asyncio.to_thread(os.link, source_path, target_path)
+            logger.info(f"hard link created successfully")
+        except OSError as e:
+            # Hard link may fail due to cross-device link error, fall back to symbolic link
+            logger.warning(f"failed to create hard link from {source_path} to {target_path}: {e}, falling back to symbolic link")
+            await asyncio.to_thread(os.symlink, source_path, target_path)
+            logger.info(f"symbolic link created successfully")
         await self.db.commit()
 
     @staticmethod

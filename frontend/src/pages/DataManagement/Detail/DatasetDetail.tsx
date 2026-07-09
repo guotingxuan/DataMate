@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { Breadcrumb, App, Tabs } from "antd";
+import { Breadcrumb, App, Tabs, Drawer, Descriptions, Modal } from "antd";
 import {
-  ReloadOutlined,
-  DownloadOutlined,
-  UploadOutlined,
-  EditOutlined,
-  DeleteOutlined,
-} from "@ant-design/icons";
+  Info,
+  Edit,
+  Upload,
+  Download,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
 import DetailHeader from "@/components/DetailHeader";
 import { getDatasetTypeMap, mapDataset } from "../dataset.const";
 import type { Dataset } from "@/pages/DataManagement/dataset.model";
@@ -36,9 +37,18 @@ export default function DatasetDetail() {
   const { t } = useTranslation();
   const datasetTypeMap = getDatasetTypeMap(t);
   const [showEditDialog, setShowEditDialog] = useState(false);
+  const [showDetailDrawer, setShowDetailDrawer] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   const [dataset, setDataset] = useState<Dataset>({} as Dataset);
-  const filesOperation = useFilesOperation(dataset);
+
+  // 定义 fetchDataset，必须在 useFilesOperation 之前定义
+  const fetchDataset = async () => {
+    const { data } = await queryDatasetByIdUsingGet(id as unknown as number);
+    setDataset(mapDataset(data, t));
+  };
+
+  const filesOperation = useFilesOperation(dataset, fetchDataset);
 
   const [showUploadDialog, setShowUploadDialog] = useState(false);
   const navigateItems = useMemo(
@@ -52,10 +62,6 @@ export default function DatasetDetail() {
     ],
     [dataset, t]
   );
-  const fetchDataset = async () => {
-    const { data } = await queryDatasetByIdUsingGet(id as unknown as number);
-    setDataset(mapDataset(data, t));
-  };
 
   useEffect(() => {
     fetchDataset();
@@ -136,9 +142,17 @@ export default function DatasetDetail() {
   // 数据集操作列表
   const operations = [
     {
+      key: "detail",
+      label: t("dataManagement.actions.detail"),
+      icon: <Info className="w-4 h-4" />,
+      onClick: () => {
+        setShowDetailDrawer(true);
+      },
+    },
+    {
       key: "edit",
       label: t("dataManagement.actions.edit"),
-      icon: <EditOutlined />,
+      icon: <Edit className="w-4 h-4" />,
       onClick: () => {
         setShowEditDialog(true);
       },
@@ -147,41 +161,27 @@ export default function DatasetDetail() {
     {
       key: "upload",
       label: t("dataManagement.actions.importData"),
-      icon: <UploadOutlined />,
+      icon: <Upload className="w-4 h-4" />,
       onClick: () => setShowUploadDialog(true),
     },
     {
       key: "export",
       label: t("dataManagement.actions.export"),
-      icon: <DownloadOutlined />,
-      // isDropdown: true,
-      // items: [
-      //   { key: "alpaca", label: "Alpaca 格式", icon: <FileTextOutlined /> },
-      //   { key: "jsonl", label: "JSONL 格式", icon: <DatabaseOutlined /> },
-      //   { key: "csv", label: "CSV 格式", icon: <FileTextOutlined /> },
-      //   { key: "coco", label: "COCO 格式", icon: <FileImageOutlined /> },
-      // ],
+      icon: <Download className="w-4 h-4" />,
       onClick: () => handleDownload(),
     },
     {
       key: "refresh",
       label: t("dataManagement.actions.refresh"),
-      icon: <ReloadOutlined />,
+      icon: <RefreshCw className="w-4 h-4" />,
       onClick: handleRefresh,
     },
     {
       key: "delete",
       label: t("dataManagement.actions.delete"),
       danger: true,
-      confirm: {
-        title: t("dataManagement.confirm.deleteDatasetTitle"),
-        description: t("dataManagement.confirm.deleteDatasetDesc"),
-        okText: t("dataManagement.confirm.deleteConfirm"),
-        cancelText: t("dataManagement.confirm.deleteCancel"),
-        okType: "danger",
-      },
-      icon: <DeleteOutlined />,
-      onClick: handleDeleteDataset,
+      icon: <Trash2 className="w-4 h-4" />,
+      onClick: () => setShowDeleteModal(true),
     },
   ];
 
@@ -266,6 +266,87 @@ export default function DatasetDetail() {
         onClose={() => setShowEditDialog(false)}
         onRefresh={handleRefresh}
       />
+      <Drawer
+        title={t("dataManagement.detail.datasetDetail")}
+        open={showDetailDrawer}
+        onClose={() => setShowDetailDrawer(false)}
+        width={600}
+      >
+        <Descriptions
+          layout="vertical"
+          size="small"
+          column={1}
+          items={[
+            {
+              key: "id",
+              label: t("dataManagement.labels.id"),
+              children: dataset.id,
+            },
+            {
+              key: "name",
+              label: t("dataManagement.labels.name"),
+              children: dataset.name,
+            },
+            {
+              key: "description",
+              label: t("dataManagement.labels.description"),
+              children: dataset.description || t("dataManagement.defaults.none"),
+            },
+            {
+              key: "datasetType",
+              label: t("dataManagement.labels.type"),
+              children: datasetTypeMap[dataset?.datasetType]?.label || t("dataManagement.defaults.unknown"),
+            },
+            {
+              key: "status",
+              label: t("dataManagement.labels.status"),
+              children: dataset?.status?.label || t("dataManagement.defaults.unknown"),
+            },
+            {
+              key: "createdBy",
+              label: t("dataManagement.labels.creator"),
+              children: dataset.createdBy || t("dataManagement.defaults.unknown"),
+            },
+            {
+              key: "targetLocation",
+              label: t("dataManagement.labels.storagePath"),
+              children: dataset.targetLocation || t("dataManagement.defaults.unknown"),
+            },
+            {
+              key: "pvcName",
+              label: t("dataManagement.labels.storageName"),
+              children: dataset.pvcName || t("dataManagement.defaults.unknown"),
+            },
+            {
+              key: "createdAt",
+              label: t("dataManagement.labels.createdAt"),
+              children: dataset.createdAt,
+            },
+            {
+              key: "updatedAt",
+              label: t("dataManagement.labels.updatedAt"),
+              children: dataset.updatedAt,
+            },
+          ]}
+        />
+      </Drawer>
+
+      {/* 删除数据集确认弹窗 */}
+      <Modal
+        title={t("dataManagement.confirm.deleteDatasetTitle")}
+        open={showDeleteModal}
+        onOk={async () => {
+          setShowDeleteModal(false);
+          await handleDeleteDataset();
+        }}
+        onCancel={() => setShowDeleteModal(false)}
+        okText={t("dataManagement.confirm.deleteConfirm")}
+        cancelText={t("dataManagement.confirm.deleteCancel")}
+        okButtonProps={{ danger: true }}
+        centered
+      >
+        <p>{t("dataManagement.confirm.deleteDatasetDesc", { itemName: dataset.name || t("dataManagement.detail.title") })}</p>
+      </Modal>
     </div>
   );
 }

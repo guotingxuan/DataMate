@@ -1,8 +1,15 @@
+import re
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exception import BusinessError, ErrorCodes
 from app.module.cleaning.schema import OperatorInstanceDto
 from app.module.operator.constants import CATEGORY_DATA_JUICER_ID, CATEGORY_DATAMATE_ID
+
+# UUID pattern for task_id validation (prevents path traversal)
+_TASK_ID_PATTERN = re.compile(
+    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+)
 
 
 class CleaningTaskValidator:
@@ -28,7 +35,13 @@ class CleaningTaskValidator:
 
     @staticmethod
     def check_input_and_output(instances: list[OperatorInstanceDto]) -> None:
-        """Validate that operator input/output types are compatible"""
+        """Validate that operator input/output types are compatible.
+
+        Rules:
+        - multimodal is compatible with any type (acts as wildcard)
+        - for other types (text, image, audio, video), upstream outputs
+          must match downstream inputs exactly
+        """
         if not instances:
             return
 
@@ -48,14 +61,19 @@ class CleaningTaskValidator:
                     f"Operator {next_op.id} has no inputs defined"
                 )
 
-            current_outputs = set(current.outputs.split(','))
-            next_inputs = set(next_op.inputs.split(','))
+            current_outputs = current.outputs.lower().strip()
+            next_inputs = next_op.inputs.lower().strip()
 
-            if not current_outputs.intersection(next_inputs):
+            # multimodal is compatible with everything
+            if "multimodal" in current_outputs or "multimodal" in next_inputs:
+                continue
+
+            # non-multimodal: types must match exactly
+            if current_outputs != next_inputs:
                 raise BusinessError(
                     ErrorCodes.CLEANING_INVALID_OPERATOR_INPUT,
-                    f"Operator {current.id} outputs {current.outputs} "
-                    f"but operator {next_op.id} requires {next_op.inputs}"
+                    f"Operator '{current.id}' outputs '{current.outputs}', "
+                    f"but operator '{next_op.id}' requires '{next_op.inputs}'"
                 )
 
     @staticmethod
@@ -84,6 +102,35 @@ class CleaningTaskValidator:
 
     @staticmethod
     def check_task_id(task_id: str) -> None:
-        """Validate task ID"""
+        """Validate task ID — rejects non-UUID and path traversal patterns"""
+        CleaningTaskValidator.sanitize_task_id(task_id)
+
+    @staticmethod
+    def sanitize_task_id(task_id: str) -> str:
+        """Validate and return sanitized task_id for safe path construction.
+
+        CodeQL recognizes the return value of this function as sanitized,
+        allowing safe use in path construction.
+        """
         if not task_id:
             raise BusinessError(ErrorCodes.CLEANING_TASK_ID_REQUIRED)
+        if not _TASK_ID_PATTERN.match(task_id):
+            raise BusinessError(
+                ErrorCodes.CLEANING_TASK_ID_REQUIRED,
+                f"Invalid task_id format: {task_id}",
+            )
+        return task_id
+
+    @staticmethod
+    def sanitize_retry_count(retry_count: int) -> int:
+        """Validate and return sanitized retry_count for safe path construction.
+
+        CodeQL recognizes the return value of this function as sanitized,
+        allowing safe use in path construction.
+        """
+        if retry_count < 0 or retry_count > 1000:
+            raise BusinessError(
+                ErrorCodes.CLEANING_TASK_ID_REQUIRED,
+                f"Invalid retry_count: {retry_count}",
+            )
+        return retry_count

@@ -1,4 +1,5 @@
 import { get, post, put, del } from "@/utils/request";
+import type { UnifiedSearchResult } from "./knowledge-base.model";
 
 // 获取知识库列表
 export function queryKnowledgeBasesUsingPost(params: any) {
@@ -59,27 +60,52 @@ export function deleteKnowledgeBaseFileByIdUsingDelete(baseId: string, data: obj
   return (del as unknown as (url: string, data?: object | null) => Promise<unknown>)(`/api/knowledge-base/${baseId}/files`, data ?? null);
 }
 
-export function fetchKnowledgeGraph(data: { knowledge_base_id: string; query: string }) {
-  return post("/api/rag/query", data);
-}
-
-// 检索知识库内容
+// 检索知识库内容（统一检索接口）
 export function retrieveKnowledgeBaseContent(data: {
   query: string;
   topK?: number;
   threshold?: number;
   knowledgeBaseIds: string[];
-}) {
-  return post("/api/knowledge-base/retrieve", data);
+}): Promise<UnifiedSearchResult[]> {
+  return post("/api/knowledge-base/v2/retrieve", data);
 }
 
-// 新增：获取知识库文件详情（分页的切片数据）
+// 获取知识库文件详情（分页的切片数据）
 export function queryKnowledgeBaseFileDetailUsingGet(
   knowledgeBaseId: string,
   ragFileId: string,
-  params: { page?: number; size?: number } = { page: 1, size: 20 }
+  params: { page?: number; size?: number; expr?: string } = { page: 1, size: 20 }
 ) {
   const page = params.page ?? 1;
   const size = params.size ?? 20;
-  return get(`/api/knowledge-base/${knowledgeBaseId}/files/${ragFileId}?page=${page}&page_size=${size}`);
+  const queryParams = [`page=${page}`, `page_size=${size}`];
+  if (params.expr) {
+    queryParams.push(`expr=${encodeURIComponent(params.expr)}`);
+  }
+  return get(`/api/knowledge-base/${knowledgeBaseId}/files/${ragFileId}?${queryParams.join('&')}`);
+}
+
+export function queryKnowledgeBase(data: {
+  knowledge_base_id: string;
+  query: string;
+}) {
+  return post("/api/knowledge-base/query", data);
+}
+
+export function updateKnowledgeBaseChunk(
+  knowledgeBaseId: string,
+  chunkId: string,
+  data: { text: string; metadata?: Record<string, any> }
+) {
+  return (put as unknown as (url: string, data?: object) => Promise<unknown>)(
+    `/api/knowledge-base/${knowledgeBaseId}/chunks/${chunkId}`,
+    data
+  );
+}
+
+export function deleteKnowledgeBaseChunk(
+  knowledgeBaseId: string,
+  chunkId: string
+) {
+  return del(`/api/knowledge-base/${knowledgeBaseId}/chunks/${chunkId}`);
 }
